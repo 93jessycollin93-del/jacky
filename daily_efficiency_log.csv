@@ -1,0 +1,2 @@
+date,time,pulse_successful,pulse_avg_latency_s,pulse_min_latency_s,pulse_max_latency_s,assessment_level,gpu_temp_c,gpu_load_percent,gpu_safe,models_used
+2026-06-28,12:26:49,5,13.11,7.41,16.93,safe_for_local,51.0,3.0,?,3

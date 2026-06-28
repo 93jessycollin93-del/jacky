@@ -1,0 +1,36 @@
+{
+  "telegram_bots": {
+    "ashkatchum": {
+      "name": "Ash Katchum",
+      "token_env": "TELEGRAM_BOT_ASHKATCHUM",
+      "purpose": "Primary alerts & notifications",
+      "base44_id": "@base44_999639_bot"
+    },
+    "goku": {
+      "name": "Goku",
+      "token_env": "TELEGRAM_BOT_GOKU",
+      "purpose": "System performance & metrics",
+      "base44_id": "@base44_105429_bot"
+    },
+    "trinityblade": {
+      "name": "Trinity Blade",
+      "token_env": "TELEGRAM_BOT_TRINITYBLADE",
+      "purpose": "Security & access logs",
+      "base44_id": "@base44_122945_bot"
+    },
+    "sekuno": {
+      "name": "Sekuno",
+      "token_env": "TELEGRAM_BOT_SEKUNO",
+      "purpose": "AI decisions & optimizations",
+      "base44_id": "@base44_635642_bot"
+    }
+  },
+  "routing": {
+    "critical_alerts": ["ashkatchum"],
+    "performance_metrics": ["goku"],
+    "security_events": ["trinityblade"],
+    "ai_reasoning": ["sekuno"],
+    "broadcast_all": ["ashkatchum", "goku", "trinityblade", "sekuno"]
+  },
+  "chat_id": "PASTE_YOUR_CHAT_ID_HERE (same for all bots)"
+}

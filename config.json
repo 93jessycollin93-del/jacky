@@ -1,0 +1,99 @@
+{
+  "jacky": {
+    "version": "1.0",
+    "name": "Jacky",
+    "description": "It's Jacky's PC. You learn from Jacky."
+  },
+  "core": {
+    "max_concurrent_bots": 4,
+    "task_queue_size": 1000,
+    "worker_threads": 8,
+    "auto_start_on_boot": false,
+    "require_manual_launch": true
+  },
+  "resource_limits": {
+    "cpu_percent_project": 75,
+    "cpu_percent_max": 75,
+    "cpu_percent_burst": 90,
+    "burst_when_idle_or_needed": true,
+    "_note": "AI workloads cap at 75% CPU (project baseline). May burst to 90% when needed or when user is idle.",
+    "memory_percent_max": 85,
+    "disk_io_percent_max": 75,
+    "gpu_memory_mb_max": 24000
+  },
+  "gpu_thermal": {
+    "gpu_max_temp_c": 75,
+    "thermal_margin": 5,
+    "gpu_load_high_percent": 85,
+    "_note": "Hard stop for local work at 75C on the RTX 3090. Within 5C of that (>=70C) we back off threads and prefer small models / free cloud. Separate concern: the 980 Pro NVMe throttles under heavy sustained I/O, mitigated by loading models sequentially, not by these temps."
+  },
+  "situation_assessment": {
+    "monitor_interval_sec": 5,
+    "cpu_high_percent": 90,
+    "ram_high_percent": 90,
+    "_note": "How often the dashboard re-reads the situation, and the CPU/RAM pressure thresholds that force escalation when GPU telemetry is unavailable."
+  },
+  "preferences": {
+    "time_cost_preference": "economy",
+    "default_to_local_models": true,
+    "escalate_to_paid_only_when": ["complex", "critical", "high_priority_reasoning"],
+    "alert_threshold": "normal",
+    "education_level": "detailed"
+  },
+  "enabled_bots": [
+    "monitor_bot",
+    "github_bot"
+  ],
+  "_enabled_bots_note": "Local automation helpers (files in bots/). Security monitoring is handled separately by the user, so security_bot is not started here.",
+  "named_cloud_bots": [
+    "jacky",
+    "claude_jr"
+  ],
+  "_named_cloud_bots_note": "The two named cloud backup identities. jacky -> Gemini (free), claude_jr -> Claude Haiku (cheap). Used only when the situation assessor says local is unsafe. Removed: johnny_ai, onslaught_ai, xai_backup.",
+  "integrations": {
+    "github": {
+      "enabled": false,
+      "token": "",
+      "repos": [
+        "cyber-store",
+        "eru"
+      ]
+    },
+    "ollama": {
+      "enabled": true,
+      "api_url": "http://localhost:11434",
+      "monitor_downloads": true
+    },
+    "cloud_bots": {
+      "enabled": true,
+      "note": "Free escalation tier — the safety net, NOT the primary. Tried in order; first with keys + success wins; falls back to local. xAI paid backup removed.",
+      "providers": [
+        {"name": "groq", "enabled": true, "cost": "free"},
+        {"name": "gemini", "enabled": true, "cost": "free"},
+        {"name": "openrouter", "enabled": true, "cost": "free"}
+      ]
+    },
+    "local_file_system": {
+      "enabled": true,
+      "watch_paths": [
+        "E:\\AI\\",
+        "E:\\projects\\"
+      ]
+    }
+  },
+  "alerts": {
+    "slack_webhook": "",
+    "telegram_token": "",
+    "desktop_notifications": true,
+    "email_critical_only": false
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "detailed",
+    "retention_days": 30
+  },
+  "database": {
+    "type": "sqlite",
+    "path": "E:\\AI\\Jacky\\data\\jacky.db"
+  }
+}

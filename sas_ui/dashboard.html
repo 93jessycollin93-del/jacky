@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAS - Situational Awareness | Jacky</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0e27 0%, #1a2744 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: rgba(0, 50, 100, 0.3);
+            border-radius: 8px;
+            border-left: 4px solid #00d4ff;
+        }
+        h1 { font-size: 28px; display: flex; align-items: center; gap: 10px; }
+        .jacky-badge {
+            background: #00d4ff;
+            color: #1a1a2e;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: rgba(0, 50, 100, 0.2);
+            border: 1px solid rgba(0, 212, 255, 0.2);
+            border-radius: 8px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+        }
+        .card h2 { font-size: 16px; margin-bottom: 15px; color: #00d4ff; display: flex; align-items: center; gap: 8px; }
+        .metric {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .metric:last-child { border-bottom: none; }
+        .metric-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 13px;
+        }
+        .metric-bar {
+            background: rgba(0, 0, 0, 0.3);
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .metric-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4ff, #0099ff);
+            transition: width 0.3s ease;
+        }
+        .bot-list { display: flex; flex-direction: column; gap: 10px; }
+        .bot-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .bot-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        .bot-dot.idle { background: #888; animation: none; }
+        .bot-dot.busy { background: #00d4ff; }
+        .bot-dot.error { background: #ff4444; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .status-time { font-size: 12px; color: #00d4ff; }
+        .loading { color: #888; font-style: italic; }
+        .error { color: #ff6b6b; }
+        .model-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        .model-online { color: #00d4ff; }
+        .model-downloading { color: #ffa500; }
+        .ask-box {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .ask-box textarea {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            color: #e0e0e0;
+            padding: 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            resize: vertical;
+            min-height: 60px;
+        }
+        .ask-box textarea:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+        .ask-box button {
+            background: linear-gradient(90deg, #00d4ff, #0099ff);
+            border: none;
+            color: #1a1a2e;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: opacity 0.3s;
+        }
+        .ask-box button:hover { opacity: 0.9; }
+        .ask-box button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .ask-response {
+            background: rgba(0, 212, 255, 0.1);
+            border-left: 3px solid #00d4ff;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            line-height: 1.4;
+            color: #e0e0e0;
+        }
+        .ask-response.error {
+            border-left-color: #ff6b6b;
+            background: rgba(255, 107, 107, 0.1);
+        }
+        /* Situation assessment badge + thermal */
+        .badge-big {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 18px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+        }
+        .badge-safe { background: rgba(0, 220, 130, 0.2); color: #00dc82; border: 1px solid #00dc82; }
+        .badge-warm { background: rgba(255, 165, 0, 0.2); color: #ffa500; border: 1px solid #ffa500; }
+        .badge-escalate { background: rgba(255, 107, 107, 0.2); color: #ff6b6b; border: 1px solid #ff6b6b; }
+        .badge-unknown { background: rgba(136, 136, 136, 0.2); color: #888; border: 1px solid #888; }
+        .assess-reason { font-size: 12px; color: #aaa; margin-top: 10px; line-height: 1.4; }
+        .gpu-line { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; }
+        .gpu-line .hot { color: #ff6b6b; font-weight: bold; }
+        .gpu-line .warm { color: #ffa500; font-weight: bold; }
+        .gpu-line .cool { color: #00dc82; font-weight: bold; }
+        .why-line { font-size: 11px; color: #00d4ff; margin-top: 6px; }
+        .chain { font-size: 11px; color: #999; margin-top: 6px; font-family: monospace; }
+        .chain .ok { color: #00dc82; }
+        .chain .skip { color: #888; }
+        .chain .fail { color: #ff6b6b; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>
+                <span>🔍</span>
+                SAS Dashboard
+                <span class="jacky-badge">Jacky's PC</span>
+            </h1>
+            <div class="status-time">Last update: <span id="update-time">loading...</span></div>
+        </header>
+
+        <div class="dashboard">
+            <!-- SITUATION ASSESSMENT -->
+            <div class="card">
+                <h2><span>🧭</span> Situation Assessment</h2>
+                <div style="text-align:center; margin: 10px 0 4px;">
+                    <span id="assess-badge" class="badge-big badge-unknown">…</span>
+                </div>
+                <div class="assess-reason" id="assess-reason">Reading machine state…</div>
+            </div>
+
+            <!-- SYSTEM METRICS -->
+            <div class="card">
+                <h2><span>⚙️</span> System Health</h2>
+                <div class="metric">
+                    <div class="metric-label">
+                        <span>CPU Usage</span>
+                        <span id="cpu-val" class="loading">--</span>
+                    </div>
+                    <div class="metric-bar">
+                        <div class="metric-fill" id="cpu-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">
+                        <span>RAM Usage</span>
+                        <span id="ram-val" class="loading">--</span>
+                    </div>
+                    <div class="metric-bar">
+                        <div class="metric-fill" id="ram-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">
+                        <span>Disk Free (E:)</span>
+                        <span id="disk-val" class="loading">--</span>
+                    </div>
+                    <div class="metric-bar">
+                        <div class="metric-fill" id="disk-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BOT STATUS -->
+            <div class="card">
+                <h2><span>🤖</span> Bot Pool</h2>
+                <div class="bot-list" id="bot-list">
+                    <div class="loading">Loading bots...</div>
+                </div>
+            </div>
+
+            <!-- STATUS -->
+            <div class="card">
+                <h2><span>📊</span> Jacky Status</h2>
+                <div class="bot-list">
+                    <div id="jacky-status">
+                        <div class="metric">
+                            <div class="metric-label">
+                                <span>Ollama</span>
+                                <span id="ollama-status" class="loading">checking...</span>
+                            </div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">
+                                <span>API</span>
+                                <span id="api-status" class="loading">checking...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- THERMAL -->
+            <div class="card">
+                <h2><span>🌡️</span> GPU Thermal</h2>
+                <div id="gpu-thermal">
+                    <div class="loading">Reading GPU…</div>
+                </div>
+                <div id="temps-list" class="bot-list" style="margin-top:10px;"></div>
+            </div>
+
+            <!-- LOCAL MODELS -->
+            <div class="card">
+                <h2><span>🧠</span> Local Models</h2>
+                <div id="models-list" class="bot-list">
+                    <div class="loading">Loading model status...</div>
+                </div>
+            </div>
+
+            <!-- ASK THE ENSEMBLE -->
+            <div class="card">
+                <h2><span>💬</span> Ask the Ensemble</h2>
+                <div class="ask-box">
+                    <textarea id="ask-prompt" placeholder="Ask a question..."></textarea>
+                    <button id="ask-button">Ask</button>
+                    <div id="ask-result" style="display:none;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5000/api';
+
+        async function updateMetrics() {
+            try {
+                const response = await fetch(`${API_URL}/status`);
+                if (!response.ok) throw new Error('API error');
+
+                const data = await response.json();
+
+                // Update CPU/RAM/Disk
+                document.getElementById('cpu-val').textContent = (data.cpu || 0) + '%';
+                document.getElementById('cpu-bar').style.width = (data.cpu || 0) + '%';
+
+                document.getElementById('ram-val').textContent = (data.memory || 0) + '%';
+                document.getElementById('ram-bar').style.width = (data.memory || 0) + '%';
+
+                document.getElementById('disk-val').textContent = data.disk_free || '?.? TB';
+                document.getElementById('disk-bar').style.width = Math.min(100, (data.disk_used_percent || 0)) + '%';
+
+                // Update timestamp
+                document.getElementById('update-time').textContent = new Date().toLocaleTimeString();
+
+                // Update Ollama status
+                document.getElementById('ollama-status').textContent = '✓ Online';
+                document.getElementById('ollama-status').style.color = '#00d4ff';
+
+                // Update API status
+                document.getElementById('api-status').textContent = '✓ Online';
+                document.getElementById('api-status').style.color = '#00d4ff';
+
+                // Update GPU thermal (real nvidia-smi data)
+                const gpuDiv = document.getElementById('gpu-thermal');
+                const gpu = data.gpu || {};
+                if (gpu.available) {
+                    const t = gpu.temp_c, maxT = gpu.max_temp_c, margin = gpu.thermal_margin;
+                    const cls = t >= maxT ? 'hot' : (t >= (maxT - margin) ? 'warm' : 'cool');
+                    const memPct = gpu.mem_total_mb ? Math.round(100 * gpu.mem_used_mb / gpu.mem_total_mb) : 0;
+                    gpuDiv.innerHTML = `
+                        <div class="gpu-line"><span>Temp</span><span class="${cls}">${t.toFixed(0)}°C / ${maxT}°C max</span></div>
+                        <div class="gpu-line"><span>Headroom</span><span class="${cls}">${gpu.headroom_c}°C</span></div>
+                        <div class="gpu-line"><span>Load</span><span>${gpu.load_percent.toFixed(0)}%</span></div>
+                        <div class="gpu-line"><span>VRAM</span><span>${(gpu.mem_used_mb/1024).toFixed(1)} / ${(gpu.mem_total_mb/1024).toFixed(0)} GB (${memPct}%)</span></div>
+                        <div class="gpu-line"><span>Safe to use</span><span class="${gpu.safe_to_use ? 'cool' : 'hot'}">${gpu.safe_to_use ? '✓ yes' : '✗ too hot'}</span></div>`;
+                } else {
+                    gpuDiv.innerHTML = '<div class="loading">No GPU telemetry (nvidia-smi unavailable)</div>';
+                }
+
+                // Update temps (psutil sensors — secondary; often empty on Windows)
+                if (data.temps && Object.keys(data.temps).length > 0) {
+                    const tempsList = document.getElementById('temps-list');
+                    let html = '';
+                    for (const [sensor, temps] of Object.entries(data.temps)) {
+                        if (Array.isArray(temps)) {
+                            temps.forEach(t => {
+                                const temp = t.current || 0;
+                                const warn = temp > 80 ? '#ff6b6b' : '#00d4ff';
+                                html += `<div style="padding: 8px; background: rgba(0,0,0,0.2); border-radius: 4px; margin-bottom: 5px; font-size: 13px;">
+                                    <span>${t.label || sensor}</span>
+                                    <span style="margin-left: auto; color: ${warn}; font-weight: bold;">${temp.toFixed(1)}°C</span>
+                                </div>`;
+                            });
+                        }
+                    }
+                    if (html) tempsList.innerHTML = html;
+                }
+
+            } catch (e) {
+                console.error('Metrics error:', e);
+                document.getElementById('update-time').textContent = 'connection error';
+            }
+        }
+
+        async function updateBots() {
+            try {
+                const response = await fetch(`${API_URL}/bots`);
+                if (!response.ok) throw new Error('API error');
+
+                const data = await response.json();
+                const botList = document.getElementById('bot-list');
+
+                if (data.bots && data.bots.length > 0) {
+                    botList.innerHTML = data.bots.map(bot => `
+                        <div class="bot-status">
+                            <div class="bot-dot ${bot.status || 'idle'}"></div>
+                            <span>${bot.name}</span>
+                            <span style="margin-left: auto; color: #888; font-size: 11px;">${bot.status || 'idle'}</span>
+                        </div>
+                    `).join('');
+                } else {
+                    botList.innerHTML = '<div class="loading">No bots available</div>';
+                }
+            } catch (e) {
+                console.error('Bot error:', e);
+                document.getElementById('bot-list').innerHTML = '<div class="error">Failed to load bots</div>';
+            }
+        }
+
+        async function updateModels() {
+            try {
+                const response = await fetch(`${API_URL}/models`);
+                if (!response.ok) throw new Error('API error');
+
+                const data = await response.json();
+                const modelsList = document.getElementById('models-list');
+
+                let html = '';
+                const online = data.online || [];
+                const downloading = data.downloading || [];
+
+                if (online.length > 0) {
+                    html += '<div style="font-weight: bold; color: #00d4ff; margin-bottom: 5px;">Online:</div>';
+                    online.forEach(m => {
+                        html += `<div class="model-item">
+                            <span>${m.name}</span>
+                            <span class="model-online">✓ ${m.size_gb}GB</span>
+                        </div>`;
+                    });
+                }
+
+                if (downloading.length > 0) {
+                    if (html) html += '<div style="margin-top: 8px; font-weight: bold; color: #ffa500;">Downloading:</div>';
+                    downloading.forEach(m => {
+                        html += `<div class="model-item">
+                            <span>${m}</span>
+                            <span class="model-downloading">⏳</span>
+                        </div>`;
+                    });
+                }
+
+                if (!html) {
+                    html = '<div class="loading">No models</div>';
+                }
+
+                modelsList.innerHTML = html;
+            } catch (e) {
+                console.error('Models error:', e);
+                document.getElementById('models-list').innerHTML = '<div class="error">Failed to load models</div>';
+            }
+        }
+
+        async function updateAssessment() {
+            try {
+                const response = await fetch(`${API_URL}/assessment`);
+                if (!response.ok) throw new Error('API error');
+                const data = await response.json();
+
+                const badge = document.getElementById('assess-badge');
+                const reason = document.getElementById('assess-reason');
+                const b = (data.badge || 'Unknown');
+                badge.textContent = b;
+                const map = { 'Safe': 'badge-safe', 'Warm': 'badge-warm', 'Escalate': 'badge-escalate' };
+                badge.className = 'badge-big ' + (map[b] || 'badge-unknown');
+                reason.textContent = data.reason || '';
+            } catch (e) {
+                console.error('Assessment error:', e);
+                const badge = document.getElementById('assess-badge');
+                badge.textContent = 'Offline';
+                badge.className = 'badge-big badge-unknown';
+            }
+        }
+
+        function renderChain(chain) {
+            if (!Array.isArray(chain) || !chain.length) return '';
+            const parts = chain.map(s => {
+                const cls = s.status === 'ok' ? 'ok'
+                    : (s.status === 'skipped' || s.status === 'disabled') ? 'skip' : 'fail';
+                return `<span class="${cls}">${s.step}:${s.status}</span>`;
+            });
+            return `<div class="chain">chain → ${parts.join(' → ')}</div>`;
+        }
+
+        async function handleAsk() {
+            const prompt = document.getElementById('ask-prompt').value.trim();
+            if (!prompt) {
+                alert('Enter a prompt');
+                return;
+            }
+
+            const button = document.getElementById('ask-button');
+            button.disabled = true;
+            button.textContent = 'Thinking...';
+
+            const resultDiv = document.getElementById('ask-result');
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = '⏳ Waiting for response...';
+            resultDiv.className = '';
+
+            try {
+                const response = await fetch(`${API_URL}/ask`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt, task_type: 'general' }),
+                });
+                if (!response.ok) throw new Error('API error');
+
+                const data = await response.json();
+                const isError = data.status !== 'ok';
+                resultDiv.className = isError ? 'ask-response error' : 'ask-response';
+
+                // Build the header: show provider if cloud, model/specialty if local
+                let header = '';
+                if (data.engine === 'cloud' && data.provider) {
+                    header = `<strong>${data.provider} · ${data.model || 'cloud'}:</strong>`;
+                } else if (data.model) {
+                    header = `<strong>${data.model}${data.specialty ? ' (' + data.specialty + ')' : ''}:</strong>`;
+                } else {
+                    header = `<strong>${data.route || 'response'}:</strong>`;
+                }
+
+                const why = data.why ? `<div class="why-line">↳ why: ${data.why}</div>` : '';
+                resultDiv.innerHTML = `${header} ${data.response}${why}${renderChain(data.fallback_chain)}`;
+            } catch (e) {
+                console.error('Ask error:', e);
+                resultDiv.className = 'ask-response error';
+                resultDiv.textContent = `Error: ${e.message}`;
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Ask';
+            }
+        }
+
+        // Initial load
+        updateMetrics();
+        updateBots();
+        updateModels();
+        updateAssessment();
+
+        // Attach ask button
+        document.getElementById('ask-button').addEventListener('click', handleAsk);
+        document.getElementById('ask-prompt').addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') handleAsk();
+        });
+
+        // Refresh every 5 seconds (matches situation_assessment.monitor_interval_sec)
+        setInterval(() => {
+            updateMetrics();
+            updateBots();
+            updateModels();
+            updateAssessment();
+        }, 5000);
+    </script>
+</body>
+</html>

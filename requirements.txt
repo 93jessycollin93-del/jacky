@@ -1,0 +1,29 @@
+# JACKY - AI Operations Manager
+# Core dependencies
+
+# System monitoring
+psutil>=5.9.0
+
+# Web UI & API
+flask>=2.3.0
+flask-cors>=4.0.0
+
+# Data & storage
+sqlalchemy>=2.0.0
+
+# GitHub integration (optional for now)
+# PyGithub>=2.0.0
+# requests>=2.31.0
+
+# Async/threading (stdlib mostly, but useful)
+# aiohttp>=3.8.0
+
+# Logging & observability
+python-json-logger>=2.0.0
+
+# Local model integration
+# ollama>=0.1.0  (optional, for direct Ollama calls)
+
+# Dev/testing
+pytest>=7.0.0
+pytest-cov>=4.0.0

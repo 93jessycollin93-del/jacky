@@ -1,0 +1,158 @@
+{
+  "integrations": {
+    "slack": {
+      "enabled": true,
+      "description": "Route Jacky alerts to Slack",
+      "config": {
+        "webhook_url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+        "channel": "#ai-playground",
+        "bot_name": "Jacky",
+        "alert_levels": {
+          "critical": "red",
+          "high": "orange",
+          "normal": "blue",
+          "info": "gray"
+        },
+        "message_template": {
+          "critical": ":warning: **{message}** | {education}",
+          "high": ":exclamation: {message}",
+          "normal": ":blue_circle: {message}",
+          "info": ":information_source: {message}"
+        }
+      },
+      "setup": "Get webhook URL from: https://api.slack.com/messaging/webhooks"
+    },
+    "telegram": {
+      "enabled": true,
+      "description": "Route critical alerts to Telegram",
+      "config": {
+        "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+        "chat_id": "YOUR_TELEGRAM_CHAT_ID",
+        "alert_levels": ["critical", "high"],
+        "message_template": "🚨 *{alert_type}*\n{message}\n\n💡 _{education}_"
+      },
+      "setup": "Create bot via @BotFather on Telegram, get chat ID via /start"
+    },
+    "github": {
+      "code_review": {
+        "enabled": true,
+        "description": "Auto-review PRs for code quality",
+        "config": {
+          "token": "YOUR_GITHUB_TOKEN",
+          "review_on": ["pull_request"],
+          "checks": {
+            "theme_system": {
+              "enabled": true,
+              "path": "src/theme/**",
+              "rules": [
+                "Themes must export theme config JSON",
+                "CustomizationUI component required",
+                "Export/import validation present",
+                "localStorage fallback implemented",
+                "Error handling for invalid themes"
+              ]
+            },
+            "animations": {
+              "enabled": true,
+              "path": "src/components/AnimationCustomizer/**",
+              "rules": [
+                "All animations have duration prop",
+                "Canvas preview renders smoothly",
+                "No console errors/warnings",
+                "Mobile responsive tested",
+                "Accessibility (keyboard nav, ARIA labels)"
+              ]
+            },
+            "general": {
+              "enabled": true,
+              "rules": [
+                "No console.log left in code",
+                "PropTypes or TypeScript types defined",
+                "Comments for complex logic only",
+                "No unused imports/variables",
+                "Tests written for new features"
+              ]
+            }
+          },
+          "auto_approve_conditions": {
+            "all_checks_pass": true,
+            "author_is_trusted": false,
+            "requires_human_review": true
+          }
+        }
+      },
+      "action_workflow": {
+        "enabled": true,
+        "description": "GitHub Actions integration",
+        "config": {
+          "webhook_url": "http://localhost:5000/github/webhook",
+          "events": ["pull_request", "push", "workflow_run"],
+          "report_to_jacky": true,
+          "post_to_slack": true,
+          "post_to_telegram": "critical_only"
+        }
+      }
+    },
+    "memory_system": {
+      "enabled": true,
+      "description": "96GB unified memory integration",
+      "config": {
+        "vector_store_gb": 32,
+        "project_state_gb": 24,
+        "knowledge_graph_gb": 16,
+        "agent_memory_gb": 16,
+        "cache_gb": 8,
+        "backend": "faiss + SQLite + NetworkX + Redis in-memory",
+        "persistence": {
+          "enabled": true,
+          "sync_interval_seconds": 30,
+          "backup_location": "G:/memory-backup/"
+        }
+      }
+    }
+  },
+  "environment_variables": {
+    "SLACK_WEBHOOK_URL": "set this in .env",
+    "TELEGRAM_BOT_TOKEN": "set this in .env",
+    "TELEGRAM_CHAT_ID": "set this in .env",
+    "GITHUB_TOKEN": "set this in .env or GitHub Secrets",
+    "ANTHROPIC_API_KEY": "set this for Fable 5 access",
+    "MEMORY_SYSTEM_PATH": "E:/AI/memory",
+    "MEMORY_SYSTEM_SIZE_GB": "96"
+  },
+  "setup_instructions": {
+    "slack": [
+      "1. Go to https://api.slack.com/apps",
+      "2. Create New App → From scratch",
+      "3. Name: 'Jacky', Workspace: your workspace",
+      "4. Incoming Webhooks → Add New Webhook",
+      "5. Select channel #ai-playground",
+      "6. Copy webhook URL",
+      "7. Paste in SLACK_WEBHOOK_URL env var"
+    ],
+    "telegram": [
+      "1. Open Telegram, find @BotFather",
+      "2. /newbot → name it 'Jacky'",
+      "3. Copy the TOKEN",
+      "4. Go to your bot (@your_jacky_bot)",
+      "5. Send /start",
+      "6. Get your chat ID (from bot or via @userinfobot)",
+      "7. Paste TOKEN and CHAT_ID in env vars"
+    ],
+    "github": [
+      "1. Go to GitHub → Settings → Developer settings → Personal access tokens",
+      "2. Generate new token",
+      "3. Scopes: 'repo' (full), 'workflow'",
+      "4. Copy token, paste in GITHUB_TOKEN env var",
+      "5. Add token to GitHub repo Secrets for Actions"
+    ],
+    "anthropic_fable5": [
+      "1. Go to https://console.anthropic.com",
+      "2. Create account / sign in",
+      "3. Add payment method",
+      "4. Go to API keys → Create key",
+      "5. Copy key to ANTHROPIC_API_KEY env var",
+      "6. Test: curl -H 'x-api-key: YOUR_KEY' https://api.anthropic.com/v1/models"
+    ]
+  }
+}
