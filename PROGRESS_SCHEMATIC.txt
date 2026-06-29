@@ -1,0 +1,68 @@
+================================================================================
+  JACKY / SAS — PROGRESS SCHEMATIC          snapshot: 2026-06-28 (pre-shutdown)
+================================================================================
+
+  LEGEND:  [x] done    [~] in progress    [ ] pending / optional
+
+
+  E:\AI\
+  │
+  ├─ _RESUME_PROMPT.txt ............................. [x] paste-to-Claude on restart
+  │
+  └─ Jacky\   (git repo, 2 commits, NOT pushed)
+     │
+     ├─ ENGINE (v1.1 situation-aware) .............. [x] BUILT & TESTED
+     │   ├─ resource_policy.py  (GPU thermal + threads) ......... [x]
+     │   ├─ situation_assessor.py  (CPU/GPU/RAM -> verdict) ..... [x]
+     │   ├─ ollama_client.py / ollama_ensemble.py .............. [x]
+     │   ├─ bot_router.py  (2 bots: jacky, claude_jr) .......... [x]
+     │   ├─ cloud_router.py / cloud_client.py  (free tier) ..... [x]
+     │   └─ config.json  (thermal 75C/5C, assessment 5s) ....... [x]
+     │
+     ├─ SAS WEB APP (internet PWA) ................. [x] LIVE & VERIFIED
+     │   ├─ serve.py  (waitress production server) ............. [x]
+     │   ├─ jacky_api.py  (auth gate + login + PWA routes) ..... [x]
+     │   ├─ sas_ui\dashboard.html  (same-origin, installable) .. [x]
+     │   ├─ sas_ui\sw.js + manifest + icon.svg ................. [x]
+     │   ├─ AUTH: token login (session 30d) ................... [x]
+     │   │     token -> secrets\secrets.env : SAS_ACCESS_TOKEN
+     │   └─ TUNNEL (Cloudflare)
+     │         ├─ bin\cloudflared.exe ......................... [x] installed
+     │         ├─ Start_SAS_Public.cmd  (one-click launch) .... [x]
+     │         ├─ quick tunnel (*.trycloudflare.com) ......... [x] tested live
+     │         └─ permanent sas.cybernetic67.com ............. [ ] needs CF login
+     │
+     ├─ MODELS  (E:\AI\Ollama\models, 1.8TB free) .. [~] DOWNLOADING
+     │   ├─ dolphin-llama3:8b   (general) ..................... [x] online
+     │   ├─ qwen2.5-coder:14b   (code) ....................... [x] online
+     │   ├─ qwen3.5:4b          (reasoning) .................. [x] online
+     │   ├─ nomic-embed-text    (embeddings, 274MB) ......... [~] ~38%
+     │   ├─ whiterabbitneo      (security, ~7.5GB) .......... [ ] pending
+     │   ├─ deepseek-r1:14b     (reasoning, ~8GB) ........... [ ] pending
+     │   └─ gpt-oss:20b         (agents, ~11.5GB) .......... [ ] pending
+     │        resume:  bash pull_models.sh   (cache-resumable)
+     │        NOTE: ~0.9MB/s due to AV/VPN HTTPS interception
+     │
+     ├─ OPS TOOLS .................................. [x]
+     │   ├─ daily_workflow.py  (morning pulse + CSV log) ...... [x]
+     │   ├─ efficiency_check.py  (deep 9-task analysis) ...... [x]
+     │   └─ daily_efficiency_log.csv  (trend history) ........ [x]
+     │
+     ├─ DOCS ...................................... [x]
+     │   ├─ RESUME_HERE.md  <-- READ FIRST on restart
+     │   ├─ ARCHITECTURE.md / OPERATIONAL_GUIDE.md
+     │   ├─ TUNNEL_SETUP.md / GITHUB_SETUP.md
+     │   └─ README.md / SECRETS.md
+     │
+     └─ GITHUB ..................................... [ ] not pushed
+           user: 93jessycollin93-del   repo name: jacky
+           blocker: .env token is a placeholder (need real PAT)
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  NEXT ON RESTART:
+    1. bash pull_models.sh        (finish 4 model downloads, resumes from cache)
+    2. Start_SAS_Public.cmd       (SAS back online -> new public URL)
+    3. (optional) pause VPN/AV to make downloads fast
+    4. (optional) push to GitHub / set permanent sas.cybernetic67.com
+  ────────────────────────────────────────────────────────────────────────────

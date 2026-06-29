@@ -36,18 +36,21 @@ gh repo create jacky --public
 
 ## Step 4: Add remote and push
 
-Replace `YOUR_GITHUB_USERNAME` below:
+GitHub username: **93jessycollin93-del**
 
 ```bash
 cd /e/AI/Jacky
-git remote add origin https://github.com/YOUR_GITHUB_USERNAME/jacky.git
+git remote add origin https://github.com/93jessycollin93-del/jacky.git
 git branch -M main
 git push -u origin main
 ```
 
+When git asks for a password, paste your Personal Access Token (not your
+account password).
+
 ## Step 5: Verify
 
-Visit https://github.com/YOUR_GITHUB_USERNAME/jacky in your browser.
+Visit https://github.com/93jessycollin93-del/jacky in your browser.
 
 ---
 
