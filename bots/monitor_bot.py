@@ -35,11 +35,30 @@ class MonitorBot:
     def get_system_metrics(self) -> SystemMetrics:
         """Sample current system state."""
         import time
+        import subprocess
+
+        gpu_memory_used = 0
+        gpu_memory_total = 24576  # RTX 3090 default
+        try:
+            result = subprocess.run(
+                ['nvidia-smi', '--query-gpu=memory.used,memory.total', '--format=csv,nounits,noheader'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                parts = result.stdout.strip().split(',')
+                if len(parts) == 2:
+                    gpu_memory_used = float(parts[0].strip())
+                    gpu_memory_total = float(parts[1].strip())
+        except Exception as e:
+            log.debug(f"nvidia-smi query failed: {e}")
+
         metrics = SystemMetrics(
             cpu_percent=psutil.cpu_percent(interval=1),
             memory_percent=psutil.virtual_memory().percent,
-            gpu_memory_used=0,  # would query nvidia-smi
-            gpu_memory_total=24576,  # RTX 3090 = 24GB
+            gpu_memory_used=gpu_memory_used,
+            gpu_memory_total=gpu_memory_total,
             disk_free_gb={
                 'C': psutil.disk_usage('C:/').free / (1024**3),
                 'E': psutil.disk_usage('E:/').free / (1024**3),

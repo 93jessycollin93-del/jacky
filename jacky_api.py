@@ -92,6 +92,26 @@ assessor = None
 resource_policy = None
 CLOUD_ENABLED = False  # overridden from config.json below
 
+# Local automation bots (monitor_bot, github_bot)
+monitor_bot = None
+github_bot = None
+
+def _load_local_bots():
+    """Load the local monitor and GitHub bots."""
+    global monitor_bot, github_bot
+    try:
+        from bots.monitor_bot import MonitorBot
+        monitor_bot = MonitorBot()
+        log.info("Monitor Bot loaded")
+    except Exception as e:
+        log.warning(f"Failed to load Monitor Bot: {e}")
+    try:
+        from bots.github_bot import GitHubBot
+        github_bot = GitHubBot(token=get_secret("GITHUB_TOKEN", ""))
+        log.info("GitHub Bot loaded")
+    except Exception as e:
+        log.warning(f"Failed to load GitHub Bot: {e}")
+
 def _load_cloud_flag() -> bool:
     try:
         with open(JACKY_HOME / "config.json") as f:
@@ -132,6 +152,7 @@ def init_engine():
     log.info(f"Engine ready. cloud_enabled={CLOUD_ENABLED}")
 
 init_engine()
+_load_local_bots()
 
 # Expected models from the download queue (for online/downloading display).
 EXPECTED_MODELS = [
@@ -649,19 +670,47 @@ def api_alerts():
         ]
     })
 
+@app.route('/api/bots/github', methods=['GET'])
+def api_github_bot():
+    """Get GitHub repo status via github_bot (PRs, branches, repos)."""
+    if github_bot:
+        try:
+            result = github_bot.handle_task({"type": "status"})
+            return jsonify(result)
+        except Exception as e:
+            log.error(f"github_bot status failed: {e}")
+    return jsonify({
+        "error": "github_bot unavailable",
+        "repositories": [],
+        "prs": [],
+        "branches": []
+    }), 503
+
 @app.route('/api/metrics', methods=['GET'])
 def api_metrics():
-    """Get system metrics."""
-    # Would call monitor_bot
+    """Get system metrics (CPU, RAM, GPU, disk) via monitor_bot."""
+    if monitor_bot:
+        try:
+            metrics = monitor_bot.get_system_metrics()
+            return jsonify({
+                "cpu_percent": metrics.cpu_percent,
+                "memory_percent": metrics.memory_percent,
+                "gpu_memory_used_mb": metrics.gpu_memory_used,
+                "gpu_memory_total_mb": metrics.gpu_memory_total,
+                "disk_free_gb": metrics.disk_free_gb,
+                "processes": metrics.processes_running,
+                "alerts": monitor_bot._check_thresholds(metrics),
+                "timestamp": datetime.fromtimestamp(metrics.timestamp).isoformat()
+            })
+        except Exception as e:
+            log.error(f"monitor_bot metrics failed: {e}")
     return jsonify({
-        "cpu_percent": 45,
-        "memory_percent": 62,
-        "gpu_memory_used_mb": 3700,
+        "cpu_percent": 0,
+        "memory_percent": 0,
+        "gpu_memory_used_mb": 0,
         "gpu_memory_total_mb": 24576,
-        "disk_free_gb": {
-            "C": 1212,
-            "E": 1810
-        },
+        "disk_free_gb": {},
+        "error": "monitor_bot unavailable",
         "timestamp": datetime.now().isoformat()
     })
 
