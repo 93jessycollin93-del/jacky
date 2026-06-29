@@ -21,3 +21,8 @@ data/
 bin/
 tunnel.log*
 CURRENT_PUBLIC_URL.txt
+
+# Auto-save / workstation tooling runtime artifacts
+autosave.log
+workstation_report.txt
+.autosave.lock
