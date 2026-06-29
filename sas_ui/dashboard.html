@@ -180,6 +180,166 @@
         .chain .ok { color: #00dc82; }
         .chain .skip { color: #888; }
         .chain .fail { color: #ff6b6b; }
+
+        /* INTERACTIVE CONTROLS */
+        .control-panel {
+            background: rgba(0, 100, 150, 0.3);
+            border: 2px solid #00d4ff;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .control-panel h2 {
+            color: #00d4ff;
+            font-size: 14px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .control-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 12px;
+        }
+        .control-item {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            border-radius: 6px;
+            padding: 10px;
+        }
+        .control-item label {
+            display: block;
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 6px;
+            font-weight: bold;
+        }
+        .control-item select,
+        .control-item input[type="text"] {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(0, 212, 255, 0.4);
+            color: #e0e0e0;
+            padding: 6px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .control-item select:focus,
+        .control-item input:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+        .control-buttons {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+            flex-wrap: wrap;
+        }
+        .btn-small {
+            background: rgba(0, 212, 255, 0.2);
+            border: 1px solid #00d4ff;
+            color: #00d4ff;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-small:hover {
+            background: rgba(0, 212, 255, 0.4);
+            color: #fff;
+        }
+        .btn-small.danger {
+            border-color: #ff6b6b;
+            color: #ff6b6b;
+            background: rgba(255, 107, 107, 0.1);
+        }
+        .btn-small.danger:hover {
+            background: rgba(255, 107, 107, 0.3);
+            color: #ff9999;
+        }
+        .btn-small.active {
+            background: rgba(0, 220, 130, 0.3);
+            border-color: #00dc82;
+            color: #00dc82;
+        }
+        .toggle-switch {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+        }
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #444;
+            transition: 0.3s;
+            border-radius: 20px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 14px;
+            width: 14px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #00d4ff;
+        }
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .status-indicator.online { background: #00dc82; }
+        .status-indicator.offline { background: #ff6b6b; }
+        .status-indicator.loading { background: #ffa500; }
+
+        /* POWER PANEL ROWS */
+        .power-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 4px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .power-row:last-child { border-bottom: none; }
+        .power-dot {
+            width: 9px; height: 9px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            transition: background 0.4s;
+        }
+        .power-dot.online  { background: #00dc82; box-shadow: 0 0 6px #00dc82; }
+        .power-dot.offline { background: #444; }
+        .power-dot.busy    { background: #00d4ff; box-shadow: 0 0 6px #00d4ff; animation: pulse 1.5s infinite; }
+        .power-dot.warn    { background: #ffa500; box-shadow: 0 0 6px #ffa500; }
+        .power-name { flex: 1; font-size: 12px; }
+        .power-port { font-size: 10px; color: #666; font-family: monospace; width: 42px; text-align: right; }
     </style>
 </head>
 <body>
@@ -196,6 +356,127 @@
                 <div class="status-time">Last update: <span id="update-time">loading...</span></div>
             </div>
         </header>
+
+        <!-- POWER PANEL -->
+        <div class="control-panel">
+            <h2>⚡ Power Panel
+                <span style="font-size:11px;color:#888;font-weight:normal;margin-left:8px;"> | Preset modes:</span>
+                <button class="btn-small" onclick="applyPowerMode('eco')" style="margin-left:4px">🌱 Eco</button>
+                <button class="btn-small" onclick="applyPowerMode('balanced')" style="margin-left:2px">⚖️ Balanced</button>
+                <button class="btn-small" onclick="applyPowerMode('performance')" style="margin-left:2px">🚀 Performance</button>
+            </h2>
+            <div class="control-grid">
+
+                <!-- SERVERS -->
+                <div class="control-item">
+                    <label>🖥️ SERVERS</label>
+                    <div class="power-row" id="svc-jacky-row">
+                        <div class="power-dot offline" id="dot-jacky"></div>
+                        <div class="power-name">Jacky (Brain)</div>
+                        <div class="power-port">:5000</div>
+                        <label class="switch"><input type="checkbox" id="toggle-jacky" onchange="toggleServer('jacky',this.checked)"><span class="slider"></span></label>
+                    </div>
+                    <div class="power-row" id="svc-fcc-row">
+                        <div class="power-dot offline" id="dot-fcc"></div>
+                        <div class="power-name">FCC Proxy (Coder)</div>
+                        <div class="power-port">:8082</div>
+                        <label class="switch"><input type="checkbox" id="toggle-fcc" onchange="toggleServer('fcc',this.checked)"><span class="slider"></span></label>
+                    </div>
+                    <div class="power-row" id="svc-ollama-row">
+                        <div class="power-dot offline" id="dot-ollama"></div>
+                        <div class="power-name">Ollama (Local LLMs)</div>
+                        <div class="power-port">:11434</div>
+                        <label class="switch"><input type="checkbox" id="toggle-ollama" onchange="toggleServer('ollama',this.checked)"><span class="slider"></span></label>
+                    </div>
+                </div>
+
+                <!-- BOTS -->
+                <div class="control-item">
+                    <label>🤖 BOTS</label>
+                    <div class="power-row">
+                        <div class="power-dot" id="dot-bot-monitor"></div>
+                        <div class="power-name">Monitor Bot</div>
+                        <div class="power-port" style="color:#00dc82" id="bot-monitor-status">idle</div>
+                        <label class="switch"><input type="checkbox" id="toggle-bot-monitor" checked onchange="toggleBot('monitor',this.checked)"><span class="slider"></span></label>
+                    </div>
+                    <div class="power-row">
+                        <div class="power-dot" id="dot-bot-github"></div>
+                        <div class="power-name">GitHub Bot</div>
+                        <div class="power-port" id="bot-github-status">idle</div>
+                        <label class="switch"><input type="checkbox" id="toggle-bot-github" checked onchange="toggleBot('github',this.checked)"><span class="slider"></span></label>
+                    </div>
+                    <div class="power-row">
+                        <div class="power-dot" id="dot-bot-security"></div>
+                        <div class="power-name">Security Bot</div>
+                        <div class="power-port" id="bot-security-status">idle</div>
+                        <label class="switch"><input type="checkbox" id="toggle-bot-security" onchange="toggleBot('security',this.checked)"><span class="slider"></span></label>
+                    </div>
+                </div>
+
+                <!-- AI BACKENDS -->
+                <div class="control-item">
+                    <label>🧠 AI BACKENDS</label>
+                    <div class="power-row">
+                        <div class="power-dot online" id="dot-nim"></div>
+                        <div class="power-name">NVIDIA NIM</div>
+                        <div class="power-port" style="color:#00dc82">cloud</div>
+                        <label class="switch"><input type="checkbox" id="toggle-nim" checked onchange="toggleAI('nim',this.checked)"><span class="slider"></span></label>
+                    </div>
+                    <div class="power-row">
+                        <div class="power-dot offline" id="dot-lmstudio"></div>
+                        <div class="power-name">LM Studio</div>
+                        <div class="power-port">:1234</div>
+                        <label class="switch"><input type="checkbox" id="toggle-lmstudio" onchange="toggleAI('lmstudio',this.checked)"><span class="slider"></span></label>
+                    </div>
+                    <div class="power-row">
+                        <div class="power-dot offline" id="dot-groq"></div>
+                        <div class="power-name">Groq (fallback)</div>
+                        <div class="power-port" style="color:#888">cloud</div>
+                        <label class="switch"><input type="checkbox" id="toggle-groq" onchange="toggleAI('groq',this.checked)"><span class="slider"></span></label>
+                    </div>
+                    <div class="power-row">
+                        <div class="power-dot offline" id="dot-gemini"></div>
+                        <div class="power-name">Gemini (fallback)</div>
+                        <div class="power-port" style="color:#888">cloud</div>
+                        <label class="switch"><input type="checkbox" id="toggle-gemini" onchange="toggleAI('gemini',this.checked)"><span class="slider"></span></label>
+                    </div>
+                </div>
+
+                <!-- INTELLIGENCE LEVEL ORDERING -->
+                <div class="control-item">
+                    <label>🧠 Intelligence Tier (click to reorder)</label>
+                    <div style="font-size:11px;line-height:1.8;color:#aaa;margin-bottom:8px;">
+                        <div style="background:rgba(0,220,130,0.1);padding:4px;border-radius:3px;margin-bottom:4px;">Primary (fastest response)</div>
+                        <div class="intel-tier" onclick="moveAI('up',0)" style="cursor:pointer;padding:4px;border:1px solid rgba(0,212,255,0.2);margin:2px 0;border-radius:3px;background:rgba(0,212,255,0.05);">
+                            <span id="tier-0">1. NVIDIA NIM (40 req/min, cloud)</span> <span style="float:right;color:#666">↑↓</span>
+                        </div>
+                        <div class="intel-tier" onclick="moveAI('up',1)" style="cursor:pointer;padding:4px;border:1px solid rgba(0,212,255,0.2);margin:2px 0;border-radius:3px;background:rgba(0,212,255,0.05);">
+                            <span id="tier-1">2. Groq (free, cloud, fast)</span> <span style="float:right;color:#666">↑↓</span>
+                        </div>
+                        <div class="intel-tier" onclick="moveAI('up',2)" style="cursor:pointer;padding:4px;border:1px solid rgba(0,212,255,0.2);margin:2px 0;border-radius:3px;background:rgba(0,212,255,0.05);">
+                            <span id="tier-2">3. Gemini (free, cloud, fallback)</span> <span style="float:right;color:#666">↑↓</span>
+                        </div>
+                        <div class="intel-tier" onclick="moveAI('up',3)" style="cursor:pointer;padding:4px;border:1px solid rgba(0,212,255,0.2);margin:2px 0;border-radius:3px;background:rgba(0,212,255,0.05);">
+                            <span id="tier-3">4. LM Studio (offline, local, ~5 min)</span> <span style="float:right;color:#666">↑↓</span>
+                        </div>
+                        <div style="background:rgba(255,107,107,0.1);padding:4px;border-radius:3px;margin-top:6px;font-size:10px;">Fallback order → auto-escalate if GPU too hot</div>
+                    </div>
+                </div>
+
+                <!-- QUICK ACTIONS -->
+                <div class="control-item">
+                    <label>⚡ QUICK ACTIONS</label>
+                    <div class="control-buttons" style="flex-direction:column;gap:6px;">
+                        <button class="btn-small" onclick="checkGPUTemp()" style="text-align:left">🌡️ Check GPU Temp</button>
+                        <button class="btn-small" onclick="pullModelPrompt()" style="text-align:left">📥 Pull Model from Ollama</button>
+                        <button class="btn-small" onclick="openFCCAdmin()" style="text-align:left">⚙️ Open FCC Admin UI</button>
+                        <button class="btn-small danger" onclick="stopAll()" style="text-align:left">🛑 Stop All Servers</button>
+                    </div>
+                    <div id="action-feedback" style="margin-top:8px;font-size:11px;color:#00dc82;min-height:16px;"></div>
+                </div>
+
+            </div>
+        </div>
 
         <div class="dashboard">
             <!-- SITUATION ASSESSMENT -->
@@ -576,6 +857,275 @@
                 document.getElementById('logout-link').style.display = 'inline';
             }
         }).catch(() => {});
+
+        // ========== POWER PANEL ==========
+
+        function feedback(msg, color) {
+            const el = document.getElementById('action-feedback');
+            if (!el) return;
+            el.style.color = color || '#00dc82';
+            el.textContent = msg;
+            setTimeout(() => { el.textContent = ''; }, 4000);
+        }
+
+        function setDot(id, state) {
+            const el = document.getElementById('dot-' + id);
+            if (el) el.className = 'power-dot ' + state;
+        }
+
+        function setToggle(id, checked) {
+            const el = document.getElementById('toggle-' + id);
+            if (el) el.checked = checked;
+        }
+
+        // --- Live service polling ---
+        async function pollServices() {
+            // Jacky API (we're running inside it, so it's always reachable if this page loads)
+            fetch(`${API_URL}/status`).then(r => {
+                const on = r.ok;
+                setDot('jacky', on ? 'online' : 'offline');
+                setToggle('jacky', on);
+            }).catch(() => { setDot('jacky','offline'); setToggle('jacky',false); });
+
+            // Ollama
+            fetch('http://localhost:11434/', {mode:'no-cors'}).then(() => {
+                setDot('ollama','online'); setToggle('ollama',true);
+            }).catch(() => { setDot('ollama','offline'); setToggle('ollama',false); });
+
+            // FCC Proxy
+            fetch('http://127.0.0.1:8082/', {mode:'no-cors'}).then(() => {
+                setDot('fcc','online'); setToggle('fcc',true);
+            }).catch(() => { setDot('fcc','offline'); setToggle('fcc',false); });
+
+            // Bots — pull from /api/bots
+            fetch(`${API_URL}/bots`).then(r=>r.json()).then(data => {
+                (data.bots||[]).forEach(b => {
+                    const key = b.name.toLowerCase().replace(/\s+bot$/,'').replace(/\s+/,'');
+                    setDot('bot-'+key, b.status==='busy' ? 'busy' : 'online');
+                    const st = document.getElementById('bot-'+key+'-status');
+                    if (st) { st.textContent = b.status||'idle'; st.style.color = b.status==='busy'?'#00d4ff':'#00dc82'; }
+                });
+            }).catch(()=>{});
+
+            // Cloud AIs — check /api/assessment to see which provider was used last
+            fetch(`${API_URL}/assessment`).then(r=>r.json()).then(data => {
+                const chain = data.chain || [];
+                chain.forEach(s => {
+                    const key = s.step?.toLowerCase();
+                    if (key === 'groq')   setDot('groq',   s.status==='ok'?'online':'offline');
+                    if (key === 'gemini') setDot('gemini', s.status==='ok'?'online':'offline');
+                    if (key === 'nim')    setDot('nim',    s.status==='ok'?'online':'offline');
+                });
+                // NIM is always enabled if key is configured
+                setDot('nim', 'online');
+            }).catch(()=>{});
+        }
+
+        // --- Server toggles (launch/kill via Jacky task API) ---
+        async function toggleServer(name, on) {
+            const labels = { jacky:'Jacky', fcc:'FCC Proxy', ollama:'Ollama' };
+            const cmds = {
+                jacky:  { start: 'E:\\AI\\Jacky\\Start_Jacky.cmd',           stop: 'taskkill /F /IM python.exe /FI "WINDOWTITLE eq Jacky*"' },
+                fcc:    { start: 'E:\\AI\\free-claude-code\\Start_FreeCC_Server.cmd', stop: 'taskkill /F /IM uv.exe' },
+                ollama: { start: 'ollama serve',                               stop: 'taskkill /F /IM ollama.exe' },
+            };
+            setDot(name, 'warn');
+            feedback(`${on?'Starting':'Stopping'} ${labels[name]}…`, '#ffa500');
+
+            try {
+                const res = await fetch(`${API_URL}/task`, {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({
+                        name: `${on?'start':'stop'}_${name}`,
+                        command: on ? cmds[name].start : cmds[name].stop
+                    })
+                });
+                if (res.ok) {
+                    feedback(`${labels[name]} ${on?'started':'stopped'}`, on?'#00dc82':'#ff6b6b');
+                    setTimeout(pollServices, 3000);
+                } else { feedback(`✗ API error`, '#ff6b6b'); }
+            } catch(e) {
+                // Jacky API may not have a /run-command endpoint yet — show manual instruction
+                feedback(`Open a terminal: ${on ? cmds[name].start : cmds[name].stop}`, '#ffa500');
+            }
+            setTimeout(pollServices, 5000);
+        }
+
+        // --- Bot toggles ---
+        async function toggleBot(name, on) {
+            setDot('bot-'+name, on ? 'online' : 'offline');
+            const st = document.getElementById('bot-'+name+'-status');
+            if (st) { st.textContent = on ? 'active' : 'disabled'; st.style.color = on?'#00dc82':'#888'; }
+            feedback(`${name} bot ${on?'enabled':'disabled'}`, on?'#00dc82':'#888');
+            // Persist via config update
+            try {
+                const cfgRes = await fetch(`${API_URL}/config`);
+                const cfg = await cfgRes.json();
+                if (!cfg.bots) cfg.bots = {};
+                cfg.bots[name] = { enabled: on };
+                await fetch(`${API_URL}/config`, {
+                    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)
+                });
+            } catch(e) { console.warn('config update failed', e); }
+        }
+
+        // --- AI backend toggles ---
+        async function toggleAI(name, on) {
+            const labels = { nim:'NVIDIA NIM', lmstudio:'LM Studio', groq:'Groq', gemini:'Gemini' };
+            setDot(name, on ? 'online' : 'offline');
+            feedback(`${labels[name]} ${on?'enabled':'disabled'}`, on?'#00dc82':'#888');
+            // Persist to Jacky config
+            try {
+                const cfgRes = await fetch(`${API_URL}/config`);
+                const cfg = await cfgRes.json();
+                if (!cfg.cloud_providers) cfg.cloud_providers = {};
+                cfg.cloud_providers[name] = { enabled: on };
+                await fetch(`${API_URL}/config`, {
+                    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)
+                });
+            } catch(e) { console.warn('config update failed', e); }
+        }
+
+        // --- Quick Actions ---
+        async function checkGPUTemp() {
+            try {
+                const res = await fetch(`${API_URL}/status`);
+                const data = await res.json();
+                const gpu = data.gpu || {};
+                if (gpu.available) {
+                    const t = gpu.temp_c, maxT = gpu.max_temp_c;
+                    const icon = t >= maxT ? '🔴' : t >= maxT-5 ? '🟠' : '🟢';
+                    feedback(`${icon} GPU: ${t.toFixed(0)}°C / ${maxT}°C — ${gpu.safe_to_use?'safe for local':'too hot, use NIM'}`,
+                             gpu.safe_to_use ? '#00dc82' : '#ff6b6b');
+                } else { feedback('GPU telemetry unavailable', '#ffa500'); }
+            } catch(e) { feedback('✗ ' + e.message, '#ff6b6b'); }
+        }
+
+        function pullModelPrompt() {
+            const name = prompt('Model name to pull from Ollama:\n(e.g. qwen2.5-coder:14b, whiterabbitneo)');
+            if (!name) return;
+            feedback(`Pulling ${name}… check Local Models card`, '#ffa500');
+            fetch('http://localhost:11434/api/pull', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({name})
+            }).then(r => {
+                feedback(r.ok ? `✓ Pulling ${name} (takes 15-30 min)` : `✗ Pull failed`, r.ok?'#00dc82':'#ff6b6b');
+                setTimeout(updateModels, 5000);
+            }).catch(e => feedback('✗ Ollama offline', '#ff6b6b'));
+        }
+
+        function openFCCAdmin() {
+            window.open('http://127.0.0.1:8082/admin','_blank');
+            feedback('Opening FCC Admin UI…', '#00d4ff');
+        }
+
+        function stopAll() {
+            if (!confirm('Stop ALL servers? (Jacky, FCC Proxy, Ollama)\nYou will need to restart them manually.')) return;
+            ['jacky','fcc','ollama'].forEach(s => toggleServer(s, false));
+            feedback('Stopping all servers…', '#ff6b6b');
+        }
+
+        // ========== POWER MODES ==========
+        const POWER_MODES = {
+            eco: {
+                name: '🌱 Eco Mode (Low Power, Free)',
+                desc: 'Local Ollama only, no cloud. Slowest but zero cost & private.',
+                bots: { monitor: true, github: false, security: false },
+                ai: { nim: false, lmstudio: true, groq: false, gemini: false },
+                servers: { ollama: true, jacky: true, fcc: false },
+                tier: ['LM Studio (offline)', 'Groq (fallback)', 'Gemini (fallback)', 'NIM (disabled)']
+            },
+            balanced: {
+                name: '⚖️ Balanced Mode (Mixed)',
+                desc: 'Local first, cloud fallback. Best for cost/speed tradeoff.',
+                bots: { monitor: true, github: true, security: false },
+                ai: { nim: true, lmstudio: true, groq: true, gemini: false },
+                servers: { ollama: true, jacky: true, fcc: true },
+                tier: ['NIM (primary)', 'LM Studio (local)', 'Groq (fallback)', 'Gemini (fallback)']
+            },
+            performance: {
+                name: '🚀 Performance Mode (High Power, Best Speed)',
+                desc: 'Cloud-first, all AIs enabled. Fastest but uses quotas.',
+                bots: { monitor: true, github: true, security: true },
+                ai: { nim: true, lmstudio: false, groq: true, gemini: true },
+                servers: { ollama: false, jacky: true, fcc: true },
+                tier: ['NIM (primary)', 'Groq (fast fallback)', 'Gemini (fallback)', 'LM Studio (disabled)']
+            }
+        };
+
+        async function applyPowerMode(mode) {
+            const m = POWER_MODES[mode];
+            if (!m) return;
+            feedback(`Applying ${m.name}…`, '#ffa500');
+
+            // Apply server toggles
+            Object.entries(m.servers).forEach(([srv, on]) => toggleServer(srv, on));
+
+            // Apply bot toggles
+            Object.entries(m.bots).forEach(([bot, on]) => toggleBot(bot, on));
+
+            // Apply AI toggles
+            Object.entries(m.ai).forEach(([ai, on]) => toggleAI(ai, on));
+
+            // Apply tier order
+            m.tier.forEach((tier, i) => {
+                const el = document.getElementById('tier-' + i);
+                if (el) el.textContent = (i + 1) + '. ' + tier;
+            });
+
+            // Persist to config
+            try {
+                const cfgRes = await fetch(`${API_URL}/config`);
+                const cfg = await cfgRes.json();
+                cfg.power_mode = mode;
+                cfg.ai_tier_order = m.tier;
+                await fetch(`${API_URL}/config`, {
+                    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)
+                });
+            } catch(e) { console.warn('config save failed', e); }
+
+            setTimeout(() => feedback(`✓ ${m.name} activated`, '#00dc82'), 2000);
+            setTimeout(pollServices, 5000);
+        }
+
+        // ========== INTELLIGENCE TIER REORDERING ==========
+        let aiTierOrder = ['NIM', 'Groq', 'Gemini', 'LM Studio'];
+
+        function moveAI(direction, index) {
+            if (direction === 'up' && index > 0) {
+                [aiTierOrder[index], aiTierOrder[index - 1]] = [aiTierOrder[index - 1], aiTierOrder[index]];
+            } else if (direction === 'down' && index < aiTierOrder.length - 1) {
+                [aiTierOrder[index], aiTierOrder[index + 1]] = [aiTierOrder[index + 1], aiTierOrder[index]];
+            }
+            renderTierOrder();
+            // Persist
+            fetch(`${API_URL}/config`).then(r=>r.json()).then(cfg => {
+                cfg.ai_tier_order = aiTierOrder;
+                fetch(`${API_URL}/config`, {
+                    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(cfg)
+                }).catch(()=>{});
+            }).catch(()=>{});
+        }
+
+        function renderTierOrder() {
+            aiTierOrder.forEach((tier, i) => {
+                const el = document.getElementById('tier-' + i);
+                if (el) {
+                    let icon = '☁️', desc = tier;
+                    if (tier.includes('LM Studio')) { icon = '🔌'; desc = 'LM Studio (offline, local, ~5 min)'; }
+                    else if (tier.includes('NIM')) desc = 'NVIDIA NIM (40 req/min, cloud)';
+                    else if (tier.includes('Groq')) desc = 'Groq (free, cloud, fast)';
+                    else if (tier.includes('Gemini')) desc = 'Gemini (free, cloud, fallback)';
+                    el.textContent = (i + 1) + '. ' + icon + ' ' + desc;
+                }
+            });
+        }
+
+        // Initialize power panel
+        pollServices();
+        renderTierOrder();
+        setInterval(pollServices, 8000);
     </script>
 </body>
 </html>
