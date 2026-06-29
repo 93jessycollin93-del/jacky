@@ -20,6 +20,14 @@ from datetime import datetime, timedelta
 
 log = logging.getLogger("JackyAPI")
 
+# Squad manager — loads bots/*.json at import time
+try:
+    from squad_manager import squad_manager
+    log.info("SquadManager loaded.")
+except Exception as _e:
+    squad_manager = None
+    log.warning(f"SquadManager unavailable: {_e}")
+
 JACKY_HOME = Path(__file__).parent
 SAS_UI_PATH = JACKY_HOME / "sas_ui"
 TOOLS_DIR = r"E:\AI\ai-agents\tools"
@@ -133,6 +141,44 @@ def init_engine():
 
 init_engine()
 
+# ----------------------------------------------------------------------------
+# RUNTIME CONTROLS — the master switches the SAS dashboard drives.
+#   active        : master on/off for the whole AI team. When False, /api/ask
+#                   refuses to run anything (the team is "stood down").
+#   thinking_mode : default depth for requests that don't specify one —
+#                   "fast" | "balanced" | "deep".
+# Persisted to config.json so the choice survives restarts.
+# ----------------------------------------------------------------------------
+VALID_MODES = ("fast", "balanced", "deep")
+RUNTIME = {"active": True, "thinking_mode": "balanced"}
+
+def _load_runtime():
+    try:
+        with open(JACKY_HOME / "config.json") as f:
+            cfg = json.load(f)
+        rc = cfg.get("runtime_controls", {})
+        if isinstance(rc.get("active"), bool):
+            RUNTIME["active"] = rc["active"]
+        if rc.get("thinking_mode") in VALID_MODES:
+            RUNTIME["thinking_mode"] = rc["thinking_mode"]
+    except Exception:
+        pass
+
+def _save_runtime():
+    try:
+        path = JACKY_HOME / "config.json"
+        cfg = {}
+        if path.exists():
+            with open(path) as f:
+                cfg = json.load(f)
+        cfg["runtime_controls"] = dict(RUNTIME)
+        with open(path, "w") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception as e:
+        log.warning(f"could not persist runtime controls: {e}")
+
+_load_runtime()
+
 # Expected models from the download queue (for online/downloading display).
 EXPECTED_MODELS = [
     "qwen2.5-coder:14b", "whiterabbitneo", "gpt-oss:20b",
@@ -178,6 +224,16 @@ def dashboard():
         return send_file(str(dashboard_file))
     else:
         return {"error": "Dashboard not found"}, 404
+
+
+@app.route('/chat', methods=['GET'])
+def chat_page():
+    """Cursor-style multi-agent chat UI."""
+    chat_file = SAS_UI_PATH / "chat.html"
+    if chat_file.exists():
+        return send_file(str(chat_file))
+    return jsonify({"error": "Chat UI not found"}), 404
+
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -462,27 +518,313 @@ def _try_cloud(prompt, chain):
     return None
 
 
+def _build_agent_roster() -> list:
+    """Unified list of selectable AIs for the chat UI."""
+    agents = [{
+        "id": "auto",
+        "name": "Auto (Jacky Router)",
+        "type": "router",
+        "cost": "free",
+        "available": True,
+        "description": "Local-first routing with thermal safety",
+    }]
+    specialties = {}
+    if ensemble:
+        try:
+            specialties = {mid: m.get("specialty", "")
+                           for mid, m in ensemble.get_ensemble_status()["models"].items()}
+        except Exception:
+            pass
+    if ollama_client:
+        try:
+            for m in ollama_client.list_models():
+                name = m["name"]
+                agents.append({
+                    "id": f"local:{name}",
+                    "name": name,
+                    "type": "local",
+                    "cost": "free",
+                    "available": True,
+                    "specialty": specialties.get(name, ""),
+                    "size_gb": m.get("size_gb"),
+                })
+        except Exception as e:
+            log.warning(f"agent roster local models failed: {e}")
+    if cloud_router:
+        for info in cloud_router.available():
+            provider = info["provider"]
+            agents.append({
+                "id": f"cloud:{provider}",
+                "name": provider.title(),
+                "type": "cloud",
+                "cost": "free",
+                "available": bool(info.get("has_keys")),
+                "description": f"Free cloud tier ({provider})",
+            })
+    if bot_router:
+        try:
+            for key, info in bot_router.get_status().get("bots", {}).items():
+                agents.append({
+                    "id": f"bot:{key}",
+                    "name": info.get("name", key),
+                    "type": "bot",
+                    "cost": info.get("cost", "unknown"),
+                    "available": True,
+                    "model": info.get("model"),
+                    "provider": info.get("provider"),
+                })
+        except Exception as e:
+            log.warning(f"agent roster bots failed: {e}")
+    return agents
+
+
+def _chat_messages_for_api(messages: list) -> list:
+    """Normalize chat history to role/content pairs Ollama accepts."""
+    out = []
+    for m in messages or []:
+        role = (m.get("role") or "user").lower()
+        if role not in ("user", "assistant", "system"):
+            continue
+        content = (m.get("content") or "").strip()
+        if content:
+            out.append({"role": role, "content": content})
+    return out
+
+
+def _last_user_text(messages: list) -> str:
+    for m in reversed(messages or []):
+        if (m.get("role") or "").lower() == "user":
+            return (m.get("content") or "").strip()
+    return ""
+
+
+def _cloud_chat(provider: str, messages: list) -> dict:
+    """Run a cloud provider with full message history."""
+    import time
+    from cloud_client import CloudClient, CloudError
+    from secrets_loader import get_keys
+    from cloud_router import PROVIDER_KEYS
+
+    keys = get_keys(PROVIDER_KEYS.get(provider, []))
+    if not keys:
+        return {"agent_id": f"cloud:{provider}", "status": "error",
+                "response": f"No API keys for {provider}"}
+    client = CloudClient(provider, keys)
+    start = time.time()
+    try:
+        # Build multi-turn prompt for providers that only get a single user turn.
+        lines = []
+        for m in _chat_messages_for_api(messages):
+            prefix = m["role"].capitalize()
+            lines.append(f"{prefix}: {m['content']}")
+        prompt = "\n\n".join(lines) if lines else ""
+        if not prompt:
+            return {"agent_id": f"cloud:{provider}", "status": "error",
+                    "response": "No messages to send"}
+        text = client.generate(prompt)
+        return {
+            "agent_id": f"cloud:{provider}",
+            "agent_name": provider.title(),
+            "engine": "cloud",
+            "provider": provider,
+            "model": client.model,
+            "status": "ok",
+            "response": text,
+            "latency_s": round(time.time() - start, 2),
+        }
+    except CloudError as e:
+        return {
+            "agent_id": f"cloud:{provider}",
+            "status": "error",
+            "response": str(e),
+            "latency_s": round(time.time() - start, 2),
+        }
+
+
+def _chat_with_agent(agent_id: str, messages: list, mode: str) -> dict:
+    """Send conversation history to one specific agent."""
+    import time
+    agent_id = (agent_id or "auto").strip()
+    msgs = _chat_messages_for_api(messages)
+    if not msgs:
+        return {"agent_id": agent_id, "status": "error", "response": "No messages"}
+
+    if agent_id == "auto":
+        prompt = _last_user_text(msgs)
+        data, _code = _run_ask(prompt, "general", mode)
+        return {
+            "agent_id": "auto",
+            "agent_name": "Auto (Jacky Router)",
+            "engine": data.get("engine", "unknown"),
+            "model": data.get("model"),
+            "provider": data.get("provider"),
+            "status": data.get("status", "error"),
+            "response": data.get("response", ""),
+            "why": data.get("why"),
+            "latency_s": data.get("latency_s"),
+            "fallback_chain": data.get("fallback_chain"),
+        }
+
+    if agent_id.startswith("local:"):
+        model = agent_id[6:]
+        if not ollama_client:
+            return {"agent_id": agent_id, "status": "error", "response": "Ollama unavailable"}
+        start = time.time()
+        try:
+            text = ollama_client.chat(model, msgs)
+            return {
+                "agent_id": agent_id,
+                "agent_name": model,
+                "engine": "local",
+                "model": model,
+                "status": "ok",
+                "response": text,
+                "latency_s": round(time.time() - start, 2),
+            }
+        except Exception as e:
+            return {
+                "agent_id": agent_id,
+                "status": "error",
+                "response": str(e),
+                "latency_s": round(time.time() - start, 2),
+            }
+
+    if agent_id.startswith("cloud:"):
+        provider = agent_id[6:]
+        return _cloud_chat(provider, msgs)
+
+    if agent_id.startswith("bot:"):
+        key = agent_id[4:]
+        prompt = _last_user_text(msgs)
+        if bot_router:
+            try:
+                target = bot_router.route(key, priority="normal")
+            except Exception:
+                target = key
+        else:
+            target = key
+        if target == "ollama_local" and ensemble:
+            result = ensemble.query_best(prompt, "general", respect_thermal=True, mode=mode)
+            return {
+                "agent_id": agent_id,
+                "agent_name": key,
+                "engine": "local",
+                "model": result.get("model"),
+                "status": result.get("status", "error"),
+                "response": result.get("response", ""),
+                "latency_s": result.get("latency_s"),
+            }
+        cloud = _try_cloud(prompt, [])
+        if cloud:
+            cloud["agent_id"] = agent_id
+            cloud["agent_name"] = key
+            return cloud
+        return {"agent_id": agent_id, "status": "error", "response": "Bot route failed"}
+
+    return {"agent_id": agent_id, "status": "error", "response": f"Unknown agent: {agent_id}"}
+
+
+@app.route('/api/agents', methods=['GET'])
+def api_agents():
+    """All AIs the chat UI can pick or add to a conversation."""
+    return jsonify({
+        "agents": _build_agent_roster(),
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
+@app.route('/api/chat', methods=['POST'])
+def api_chat():
+    """Multi-turn chat with explicit agent selection or multi-agent replies.
+
+    Body:
+      messages: [{role, content}, ...]
+      agent_id: "auto" | "local:model" | "cloud:groq" | "bot:jacky"  (active agent)
+      agents:   optional list — when len>1, every agent replies to the last turn
+      mode:     fast | balanced | deep
+    """
+    if not RUNTIME["active"]:
+        return jsonify({
+            "status": "paused",
+            "response": "AI team is PAUSED. Resume from the dashboard or chat header.",
+        }), 200
+
+    data = request.get_json(silent=True) or {}
+    messages = data.get("messages") or []
+    mode = (data.get("mode") or RUNTIME["thinking_mode"]).lower()
+    if mode not in VALID_MODES:
+        mode = RUNTIME["thinking_mode"]
+
+    multi = data.get("agents") or []
+    if len(multi) > 1:
+        results = [_chat_with_agent(aid, messages, mode) for aid in multi]
+        ok = any(r.get("status") == "ok" for r in results)
+        return jsonify({
+            "status": "ok" if ok else "error",
+            "multi": True,
+            "responses": results,
+            "timestamp": datetime.now().isoformat(),
+        })
+
+    agent_id = data.get("agent_id") or (multi[0] if multi else "auto")
+    result = _chat_with_agent(agent_id, messages, mode)
+    result["timestamp"] = datetime.now().isoformat()
+    status_code = 200 if result.get("status") in ("ok", "paused") else 503
+    return jsonify(result), status_code
+
+
+@app.route('/api/control', methods=['GET', 'POST'])
+def api_control():
+    """Read or set the master runtime controls (active switch + thinking mode).
+
+    GET  -> {"active": bool, "thinking_mode": "fast|balanced|deep"}
+    POST -> body may include {"active": bool} and/or {"thinking_mode": "..."}.
+            Returns the updated state. Persists to config.json.
+    """
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        if isinstance(data.get("active"), bool):
+            RUNTIME["active"] = data["active"]
+        mode = (data.get("thinking_mode") or "").lower()
+        if mode in VALID_MODES:
+            RUNTIME["thinking_mode"] = mode
+        _save_runtime()
+        log.info(f"Runtime controls updated: {RUNTIME}")
+    return jsonify({**RUNTIME, "valid_modes": list(VALID_MODES),
+                    "timestamp": datetime.now().isoformat()})
+
+
 @app.route('/api/ask', methods=['POST'])
 def api_ask():
-    """Ask the AI with situation-aware routing and an explicit fallback chain.
-
-    Body: {"prompt": "...", "task_type": "general"|"code"|"security"|...}
-
-    Fallback chain: local -> cloud (free tier) -> forced local -> error.
-    A live situation assessment gates whether local runs at all: if the GPU is
-    too hot/loaded, we skip straight to the free cloud tier instead of cooking
-    the card. The response reports the assessment, the chosen model, *why*, and
-    every step the request walked through.
-    """
+    """Ask the AI with situation-aware routing and an explicit fallback chain."""
     data = request.get_json(silent=True) or {}
     prompt = (data.get("prompt") or "").strip()
     task_type = (data.get("task_type") or "general").strip()
     if not prompt:
         return jsonify({"error": "prompt is required"}), 400
 
+    if not RUNTIME["active"]:
+        return jsonify({
+            "status": "paused",
+            "engine": "none",
+            "response": "🛑 AI team is PAUSED. Flip the Active switch in the SAS "
+                        "Power Panel to resume.",
+            "active": False,
+            "fallback_chain": [{"step": "master_switch", "status": "paused"}],
+        }), 200
+
+    mode = (data.get("mode") or data.get("thinking_mode") or "").lower()
+    if mode not in VALID_MODES:
+        mode = RUNTIME["thinking_mode"]
+
+    result, code = _run_ask(prompt, task_type, mode)
+    return jsonify(result), code
+
+
+def _run_ask(prompt: str, task_type: str, mode: str):
+    """Core ask logic — returns (response_dict, http_status)."""
     chain = []
 
-    # Live situation assessment (thermal/load/VRAM verdict).
     assessment = {}
     if assessor:
         try:
@@ -490,7 +832,6 @@ def api_ask():
         except Exception as e:
             log.warning(f"assessment error: {e}")
 
-    # Task-complexity routing (economy brain): local vs a named cloud bot.
     target = "ollama_local"
     if bot_router:
         try:
@@ -501,23 +842,23 @@ def api_ask():
     safe_local = assessment.get("safe_to_run_local", True)
     complexity_escalates = target != "ollama_local"
 
-    # ---- Step 1: local (only if thermally safe AND task doesn't demand cloud) ----
     if ensemble and safe_local and not complexity_escalates:
-        result = ensemble.query_best(prompt, task_type, respect_thermal=True)
+        result = ensemble.query_best(prompt, task_type, respect_thermal=True, mode=mode)
         if result.get("status") == "ok":
             chain.append({"step": "local", "status": "ok", "model": result.get("model")})
-            return jsonify({
+            return ({
                 "route": "ollama_local",
                 "engine": "local",
                 "model": result.get("model"),
                 "specialty": result.get("specialty"),
                 "status": "ok",
+                "thinking_mode": mode,
                 "latency_s": result.get("latency_s"),
                 "response": result.get("response"),
                 "why": result.get("assessment", {}).get("reason", "GPU healthy — ran local."),
                 "assessment": assessment,
                 "fallback_chain": chain,
-            })
+            }, 200)
         if result.get("status") == "escalate":
             chain.append({"step": "local", "status": "escalate",
                           "detail": result.get("reason")})
@@ -530,7 +871,6 @@ def api_ask():
                assessment.get("reason", "local unsafe"))
         chain.append({"step": "local", "status": "skipped", "detail": why})
 
-    # ---- Step 2: free cloud escalation tier ----
     cloud_result = _try_cloud(prompt, chain)
     if cloud_result:
         cloud_result.update({
@@ -540,38 +880,37 @@ def api_ask():
             "assessment": assessment,
             "fallback_chain": chain,
         })
-        return jsonify(cloud_result)
+        return (cloud_result, 200)
 
-    # ---- Step 3: forced local (last resort — better a warm GPU than nothing) ----
     if ensemble:
-        result = ensemble.query_best(prompt, task_type, respect_thermal=False)
+        result = ensemble.query_best(prompt, task_type, respect_thermal=False, mode=mode)
         if result.get("status") == "ok":
             chain.append({"step": "forced_local", "status": "ok",
                           "model": result.get("model")})
-            return jsonify({
+            return ({
                 "route": "ollama_local (forced fallback)",
                 "engine": "local",
                 "model": result.get("model"),
                 "specialty": result.get("specialty"),
+                "thinking_mode": mode,
                 "status": "ok",
                 "latency_s": result.get("latency_s"),
                 "response": result.get("response"),
                 "why": "Cloud unavailable; ran local as last resort despite thermal state.",
                 "assessment": assessment,
                 "fallback_chain": chain,
-            })
+            }, 200)
         chain.append({"step": "forced_local", "status": "error",
                       "detail": result.get("response") or result.get("error")})
 
-    # ---- Step 4: error with explanation ----
-    return jsonify({
+    return ({
         "status": "error",
         "engine": "none",
         "response": "All routes failed: local was unsafe/unavailable and the free "
                     "cloud tier could not answer. See fallback_chain for details.",
         "assessment": assessment,
         "fallback_chain": chain,
-    }), 503
+    }, 503)
 
 @app.route('/api/task', methods=['POST'])
 def api_submit_task():
@@ -664,6 +1003,261 @@ def api_metrics():
         },
         "timestamp": datetime.now().isoformat()
     })
+
+# ============================================================================
+# HUB PAGE
+# ============================================================================
+
+@app.route('/hub', methods=['GET'])
+def hub():
+    """Three-panel command center: squad roster | chat | SAS stats."""
+    hub_file = SAS_UI_PATH / "hub.html"
+    if hub_file.exists():
+        return send_file(str(hub_file))
+    return jsonify({"error": "Hub UI not found — build hub.html first"}), 404
+
+# ============================================================================
+# SQUAD API
+# ============================================================================
+
+@app.route('/api/squads', methods=['GET'])
+def api_squads():
+    """Return all squads and their bot rosters."""
+    if not squad_manager:
+        return jsonify({"error": "SquadManager unavailable"}), 503
+    return jsonify({
+        "squads": squad_manager.all_squads(),
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
+@app.route('/api/squads/bots', methods=['GET'])
+def api_squads_bots():
+    """Flat list of all bots across all squads."""
+    if not squad_manager:
+        return jsonify({"error": "SquadManager unavailable"}), 503
+    return jsonify({
+        "bots": squad_manager.all_bots(),
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
+@app.route('/api/squads/<squad>/ask', methods=['POST'])
+def api_squad_ask(squad: str):
+    """Route to the squad's lead bot only (single response with memory)."""
+    if not RUNTIME["active"]:
+        return jsonify({"status": "paused",
+                        "response": "AI team is PAUSED."}), 200
+    if not squad_manager:
+        return jsonify({"error": "SquadManager unavailable"}), 503
+
+    data = request.get_json(silent=True) or {}
+    messages = data.get("messages") or []
+    mode = (data.get("mode") or RUNTIME["thinking_mode"]).lower()
+    if mode not in VALID_MODES:
+        mode = RUNTIME["thinking_mode"]
+
+    lead = squad_manager.get_lead(squad)
+    if not lead:
+        return jsonify({"error": f"Unknown squad: {squad}"}), 404
+
+    # Build the user prompt for memory retrieval
+    user_prompt = ""
+    for m in reversed(messages):
+        if (m.get("role") or "").lower() == "user":
+            user_prompt = (m.get("content") or "").strip()
+            break
+
+    # Inject memory + personality into messages as system prefix
+    system_text = squad_manager.build_system_prompt(lead, user_prompt)
+    augmented = [{"role": "system", "content": system_text}] + list(messages)
+
+    result = _chat_with_agent(lead.model_preference or "auto", augmented, mode)
+    result.update({
+        "bot_id":   lead.id,
+        "bot_name": lead.name,
+        "squad":    squad,
+        "memory_injected": lead.memory_enabled,
+        "timestamp": datetime.now().isoformat(),
+    })
+    status_code = 200 if result.get("status") in ("ok", "paused") else 503
+    return jsonify(result), status_code
+
+
+@app.route('/api/squads/<squad>/discuss', methods=['POST'])
+def api_squad_discuss(squad: str):
+    """All squad members reply to the last user message (multi-agent mode)."""
+    if not RUNTIME["active"]:
+        return jsonify({"status": "paused",
+                        "response": "AI team is PAUSED."}), 200
+    if not squad_manager:
+        return jsonify({"error": "SquadManager unavailable"}), 503
+
+    data = request.get_json(silent=True) or {}
+    messages = data.get("messages") or []
+    mode = (data.get("mode") or RUNTIME["thinking_mode"]).lower()
+    if mode not in VALID_MODES:
+        mode = RUNTIME["thinking_mode"]
+
+    bots = squad_manager.get_squad(squad)
+    if not bots:
+        return jsonify({"error": f"Unknown or empty squad: {squad}"}), 404
+
+    user_prompt = ""
+    for m in reversed(messages):
+        if (m.get("role") or "").lower() == "user":
+            user_prompt = (m.get("content") or "").strip()
+            break
+
+    responses = []
+    for bot in bots:
+        if not bot.active:
+            continue
+        system_text = squad_manager.build_system_prompt(bot, user_prompt)
+        augmented = [{"role": "system", "content": system_text}] + list(messages)
+        result = _chat_with_agent(bot.model_preference or "auto", augmented, mode)
+        result.update({
+            "bot_id":   bot.id,
+            "bot_name": bot.name,
+            "color":    bot.color,
+        })
+        responses.append(result)
+
+    ok = any(r.get("status") == "ok" for r in responses)
+    return jsonify({
+        "status":    "ok" if ok else "error",
+        "multi":     True,
+        "squad":     squad,
+        "responses": responses,
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
+@app.route('/api/squads/reload', methods=['POST'])
+def api_squads_reload():
+    """Hot-reload bot configs from bots/*.json without restarting."""
+    if not squad_manager:
+        return jsonify({"error": "SquadManager unavailable"}), 503
+    squad_manager.reload()
+    return jsonify({"status": "reloaded",
+                    "bots": len(squad_manager.all_bots()),
+                    "timestamp": datetime.now().isoformat()})
+
+# ============================================================================
+# SHELL API — whitelisted PowerShell execution
+# ============================================================================
+
+import subprocess, re as _re, shlex as _shlex
+
+_SHELL_WHITELIST = [
+    r"^Get-",
+    r"^ls\b", r"^dir\b", r"^cat\b",
+    r"^python\b", r"^pip\b",
+    r"^ollama\b",
+    r"^git (status|log|diff|branch|show)\b",
+    r"^nvidia-smi\b",
+    r"^netstat\b", r"^ipconfig\b",
+    r"^tasklist\b", r"^Get-Process\b",
+    r"^curl\b",
+    r"^echo\b", r"^Write-Host\b",
+    r"^Select-Object\b", r"^Where-Object\b", r"^Sort-Object\b",
+    r"^Get-Content\b", r"^Test-Path\b", r"^Resolve-Path\b",
+]
+
+_SHELL_BLOCK = [
+    r"Remove-Item", r"rm\b", r"del\b", r"rd\b",
+    r"format\b", r"reg\s+add", r"reg\s+delete",
+    r"netsh\s+(add|delete|set)",
+    r"Set-ExecutionPolicy",
+    r"Invoke-Expression", r"iex\b",
+    r"DownloadFile", r"WebClient",
+    r"Start-Process.*-Verb\s*RunAs",
+    r"shutdown", r"restart-computer",
+]
+
+def _shell_allowed(command: str) -> tuple[bool, str]:
+    cmd = command.strip()
+    for pattern in _SHELL_BLOCK:
+        if _re.search(pattern, cmd, _re.IGNORECASE):
+            return False, f"Blocked: matches deny-list pattern '{pattern}'"
+    for pattern in _SHELL_WHITELIST:
+        if _re.search(pattern, cmd, _re.IGNORECASE):
+            return True, "ok"
+    return False, "Not in allow-list. Add it to _SHELL_WHITELIST in jacky_api.py."
+
+
+@app.route('/api/shell', methods=['POST'])
+def api_shell():
+    """Execute a whitelisted PowerShell command and return output."""
+    if not REQUIRE_AUTH and not session.get("authed"):
+        pass  # Open SAS — allow
+    elif REQUIRE_AUTH and not session.get("authed"):
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    command = (data.get("command") or "").strip()
+    if not command:
+        return jsonify({"error": "command is required"}), 400
+
+    allowed, reason = _shell_allowed(command)
+    if not allowed:
+        return jsonify({
+            "status": "blocked",
+            "command": command,
+            "reason": reason,
+        }), 403
+
+    try:
+        result = subprocess.run(
+            ["powershell", "-NonInteractive", "-Command", command],
+            capture_output=True, text=True, timeout=30
+        )
+        return jsonify({
+            "status":    "ok",
+            "command":   command,
+            "stdout":    result.stdout[:8000],
+            "stderr":    result.stderr[:2000],
+            "exit_code": result.returncode,
+            "timestamp": datetime.now().isoformat(),
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"status": "error", "command": command,
+                        "error": "Command timed out (30s limit)"}), 408
+    except Exception as e:
+        return jsonify({"status": "error", "command": command,
+                        "error": str(e)}), 500
+
+# ============================================================================
+# SAS COMMS — Claude Code personality gating
+# ============================================================================
+
+@app.route('/api/sas-comms/activate', methods=['POST'])
+def sas_comms_activate():
+    """Activate SAS communications intelligence mode (enables Claude Code)."""
+    session["sas_comms"] = True
+    log.info("SAS comms mode activated for this session.")
+    return jsonify({"status": "active", "claude_code_enabled": True,
+                    "timestamp": datetime.now().isoformat()})
+
+
+@app.route('/api/sas-comms/status', methods=['GET'])
+def sas_comms_status():
+    return jsonify({
+        "active": bool(session.get("sas_comms")),
+        "timestamp": datetime.now().isoformat(),
+    })
+
+# ============================================================================
+# DATA COLLECTOR — background asset collection & refinement endpoints.
+# Wired in with a guard so a collector import error can't take down the API.
+# All /api/collector/* routes are protected by the global auth gate above.
+# ============================================================================
+try:
+    from data_collector import register_collector_routes
+    register_collector_routes(app)
+    log.info("Data collector routes registered (/api/collector/*).")
+except Exception as e:
+    log.warning(f"Data collector routes unavailable: {e}")
 
 # ============================================================================
 # ERROR HANDLERS

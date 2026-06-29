@@ -87,6 +87,14 @@ class CloudClient:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {key}",
+                # Cloudflare's Browser Integrity Check (in front of Groq et al.)
+                # returns HTTP 403 "error code: 1010" when it sees urllib's
+                # default bot UA. A normal browser UA passes the check. This was
+                # the real cause of the "invalid key" 403s — not the keys.
+                "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                               "AppleWebKit/537.36 (KHTML, like Gecko) "
+                               "Chrome/126.0.0.0 Safari/537.36"),
+                "Accept": "application/json",
             },
         )
         with urllib.request.urlopen(req, timeout=timeout or self.timeout, context=_SSL_CTX) as resp:
