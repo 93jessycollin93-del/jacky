@@ -7,6 +7,8 @@ psutil>=5.9.0
 # Web UI & API
 flask>=2.3.0
 flask-cors>=4.0.0
+waitress>=3.0.0   # production WSGI server (serve.py) for internet exposure
+requests>=2.31.0  # used by daily_workflow.py / efficiency_check.py
 
 # Data & storage
 sqlalchemy>=2.0.0

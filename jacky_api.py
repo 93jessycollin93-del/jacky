@@ -7,12 +7,16 @@ Serves the web UI and API endpoints for Jacky Core.
 import json
 import os
 import sys
+import hmac
+import secrets as _secrets
 import logging
 import psutil
 from pathlib import Path
-from flask import Flask, jsonify, request, send_file
+from functools import wraps
+from flask import (Flask, jsonify, request, send_file, session,
+                   redirect, Response, render_template_string)
 from flask_cors import CORS
-from datetime import datetime
+from datetime import datetime, timedelta
 
 log = logging.getLogger("JackyAPI")
 
@@ -26,7 +30,57 @@ for p in (str(JACKY_HOME), TOOLS_DIR):
         sys.path.insert(0, p)
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, supports_credentials=True)
+
+# ----------------------------------------------------------------------------
+# AUTH — protects SAS when it's exposed to the internet (Cloudflare Tunnel).
+# A login token gates the dashboard + API. Auth turns ON automatically the
+# moment SAS_ACCESS_TOKEN is set (in the vault or env); without it, SAS runs
+# open for LAN-only use and logs a loud warning.
+# ----------------------------------------------------------------------------
+try:
+    from secrets_loader import get_secret
+except Exception:
+    def get_secret(name, default=None):
+        return os.getenv(name, default)
+
+SAS_ACCESS_TOKEN = get_secret("SAS_ACCESS_TOKEN") or ""
+REQUIRE_AUTH = bool(SAS_ACCESS_TOKEN.strip())
+
+# Stable secret key so sessions survive restarts; falls back to random.
+app.secret_key = (get_secret("SAS_SECRET_KEY")
+                  or os.getenv("SAS_SECRET_KEY")
+                  or _secrets.token_hex(32))
+app.permanent_session_lifetime = timedelta(days=30)
+
+# Paths reachable WITHOUT a session (login flow, health, PWA shell assets).
+_OPEN_PATHS = {
+    "/health", "/login", "/logout",
+    "/manifest.webmanifest", "/sw.js",
+    "/icon.svg", "/icon-maskable.svg", "/favicon.ico",
+}
+
+if REQUIRE_AUTH:
+    log.info("AUTH ENABLED — SAS_ACCESS_TOKEN is set; login required.")
+else:
+    log.warning("AUTH DISABLED — no SAS_ACCESS_TOKEN set. SAS is OPEN. "
+                "Set SAS_ACCESS_TOKEN in the vault before exposing to the internet.")
+
+
+@app.before_request
+def _gate():
+    """Block unauthenticated access when auth is enabled."""
+    if not REQUIRE_AUTH:
+        return None
+    path = request.path.rstrip("/") or "/"
+    if path in _OPEN_PATHS:
+        return None
+    if session.get("authed"):
+        return None
+    # API callers get a clean 401; browsers get the login page.
+    if path.startswith("/api"):
+        return jsonify({"error": "unauthorized", "login": "/login"}), 401
+    return redirect("/login")
 
 # ----------------------------------------------------------------------------
 # LIVE AI ENGINE — local-first. Built once at import; cloud stays OFF.
@@ -127,12 +181,122 @@ def dashboard():
 
 @app.route('/health', methods=['GET'])
 def health():
-    """Health check."""
+    """Health check (always open — used by the tunnel + uptime checks)."""
     return jsonify({
         "status": "healthy",
         "service": "Jacky API",
+        "auth": "enabled" if REQUIRE_AUTH else "disabled",
         "timestamp": datetime.now().isoformat()
     })
+
+# ----------------------------------------------------------------------------
+# AUTH ROUTES
+# ----------------------------------------------------------------------------
+_LOGIN_HTML = """<!DOCTYPE html><html lang=en><head><meta charset=UTF-8>
+<meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SAS — Sign in</title>
+<link rel=manifest href=/manifest.webmanifest>
+<meta name=theme-color content=#0a0e27>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:linear-gradient(135deg,#0a0e27,#1a2744);
+color:#e0e0e0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:rgba(0,50,100,.25);border:1px solid rgba(0,212,255,.25);border-radius:16px;
+padding:36px 28px;width:100%;max-width:360px;backdrop-filter:blur(10px)}
+h1{font-size:22px;margin-bottom:6px;display:flex;align-items:center;gap:10px}
+.sub{font-size:13px;color:#8aa;margin-bottom:24px}
+label{font-size:12px;color:#9bd;display:block;margin-bottom:6px}
+input{width:100%;background:rgba(0,0,0,.3);border:1px solid rgba(0,212,255,.3);color:#e0e0e0;
+padding:12px;border-radius:8px;font-size:16px;margin-bottom:16px}
+input:focus{outline:none;border-color:#00d4ff}
+button{width:100%;background:linear-gradient(90deg,#00d4ff,#0099ff);border:none;color:#06223a;
+padding:13px;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer}
+button:active{transform:scale(.98)}
+.err{color:#ff8a8a;font-size:13px;margin-bottom:14px;{{ 'display:block' if error else 'display:none' }}}
+.logo{width:34px;height:34px;vertical-align:middle}
+</style></head><body>
+<form class=card method=POST action=/login>
+<h1><img class=logo src=/icon.svg alt="">SAS</h1>
+<div class=sub>Situational Awareness · Jacky's PC</div>
+<div class=err>Wrong access token. Try again.</div>
+<label for=token>Access token</label>
+<input id=token name=token type=password autocomplete=current-password autofocus
+placeholder="paste your token" inputmode=text>
+<button type=submit>Sign in</button>
+</form></body></html>"""
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Token login. GET shows the form; POST validates and starts a session."""
+    if not REQUIRE_AUTH:
+        return redirect("/dashboard")
+    error = False
+    if request.method == 'POST':
+        supplied = (request.form.get("token") or "").strip()
+        if hmac.compare_digest(supplied, SAS_ACCESS_TOKEN):
+            session.permanent = True
+            session["authed"] = True
+            return redirect("/dashboard")
+        error = True
+    return render_template_string(_LOGIN_HTML, error=error), (401 if error else 200)
+
+
+@app.route('/logout', methods=['GET', 'POST'])
+def logout():
+    session.clear()
+    return redirect("/login")
+
+# ----------------------------------------------------------------------------
+# PWA ROUTES — make SAS installable as a phone/desktop app
+# ----------------------------------------------------------------------------
+@app.route('/manifest.webmanifest', methods=['GET'])
+def manifest():
+    data = {
+        "name": "SAS — Jacky Situational Awareness",
+        "short_name": "SAS",
+        "description": "Live GPU/AI situational awareness for Jacky's PC.",
+        "start_url": "/dashboard",
+        "scope": "/",
+        "display": "standalone",
+        "orientation": "portrait-primary",
+        "background_color": "#0a0e27",
+        "theme_color": "#0a0e27",
+        "icons": [
+            {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+            {"src": "/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable"},
+        ],
+    }
+    return Response(json.dumps(data), mimetype="application/manifest+json")
+
+
+@app.route('/sw.js', methods=['GET'])
+def service_worker():
+    f = SAS_UI_PATH / "sw.js"
+    if f.exists():
+        resp = send_file(str(f), mimetype="application/javascript")
+        resp.headers["Service-Worker-Allowed"] = "/"
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+    return Response("// sw missing", mimetype="application/javascript")
+
+
+@app.route('/icon.svg', methods=['GET'])
+def icon_svg():
+    f = SAS_UI_PATH / "icon.svg"
+    return send_file(str(f), mimetype="image/svg+xml") if f.exists() else ("", 404)
+
+
+@app.route('/icon-maskable.svg', methods=['GET'])
+def icon_maskable():
+    f = SAS_UI_PATH / "icon-maskable.svg"
+    return send_file(str(f), mimetype="image/svg+xml") if f.exists() else ("", 404)
+
+
+@app.route('/favicon.ico', methods=['GET'])
+def favicon():
+    f = SAS_UI_PATH / "icon.svg"
+    return send_file(str(f), mimetype="image/svg+xml") if f.exists() else ("", 404)
 
 # ============================================================================
 # API ENDPOINTS
@@ -525,7 +689,12 @@ def init_jacky_api(core_instance=None):
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    log.info("Starting Jacky API server...")
-    log.info("SAS Dashboard: http://localhost:5000/dashboard")
-    log.info("REST API: http://localhost:5000/api/...")
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    # Bind to all interfaces by default so the Cloudflare Tunnel (and LAN) can
+    # reach it. Debug is OFF for safety. For a hardened production run use
+    # serve.py (waitress). Override with SAS_HOST / SAS_PORT.
+    host = os.getenv("SAS_HOST", "0.0.0.0")
+    port = int(os.getenv("SAS_PORT", "5000"))
+    log.info("Starting Jacky API server (dev/Flask)...")
+    log.info(f"SAS Dashboard: http://localhost:{port}/dashboard")
+    log.info(f"Auth: {'ENABLED' if REQUIRE_AUTH else 'DISABLED (LAN only!)'}")
+    app.run(host=host, port=port, debug=False)

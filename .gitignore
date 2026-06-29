@@ -14,4 +14,10 @@ __pycache__/
 # Data / logs
 data/
 *.log
+*.err
 *.db
+
+# Tunnel binary + runtime artifacts (don't commit the 52MB exe)
+bin/
+tunnel.log*
+CURRENT_PUBLIC_URL.txt

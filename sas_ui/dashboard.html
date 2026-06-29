@@ -2,8 +2,16 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>SAS - Situational Awareness | Jacky</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0a0e27">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icon.svg">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SAS">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -182,7 +190,11 @@
                 SAS Dashboard
                 <span class="jacky-badge">Jacky's PC</span>
             </h1>
-            <div class="status-time">Last update: <span id="update-time">loading...</span></div>
+            <div style="display:flex;align-items:center;gap:14px;">
+                <button id="install-btn" style="display:none;background:linear-gradient(90deg,#00d4ff,#0099ff);border:none;color:#06223a;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;">Install app</button>
+                <a id="logout-link" href="/logout" style="display:none;color:#8aa;font-size:12px;text-decoration:none;">Sign out</a>
+                <div class="status-time">Last update: <span id="update-time">loading...</span></div>
+            </div>
         </header>
 
         <div class="dashboard">
@@ -286,11 +298,18 @@
     </div>
 
     <script>
-        const API_URL = 'http://localhost:5000/api';
+        const API_URL = '/api';  // same-origin — works on localhost, LAN, and the tunnel
+
+        // If any API call returns 401 (auth on, session expired), go to login.
+        function handle401(resp) {
+            if (resp && resp.status === 401) { window.location.href = '/login'; return true; }
+            return false;
+        }
 
         async function updateMetrics() {
             try {
                 const response = await fetch(`${API_URL}/status`);
+                if (handle401(response)) return;
                 if (!response.ok) throw new Error('API error');
 
                 const data = await response.json();
@@ -526,6 +545,37 @@
             updateModels();
             updateAssessment();
         }, 5000);
+
+        // ---- PWA: service worker + install prompt + auth-aware controls ----
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').catch(e => console.warn('SW failed:', e));
+        }
+
+        let deferredPrompt = null;
+        const installBtn = document.getElementById('install-btn');
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            installBtn.style.display = 'inline-block';
+        });
+        installBtn.addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            deferredPrompt.prompt();
+            await deferredPrompt.userChoice;
+            deferredPrompt = null;
+            installBtn.style.display = 'none';
+        });
+        // Already installed (standalone)? Hide the install button.
+        if (window.matchMedia('(display-mode: standalone)').matches) {
+            installBtn.style.display = 'none';
+        }
+
+        // Show "Sign out" only when auth is enabled on the server.
+        fetch('/health').then(r => r.json()).then(d => {
+            if (d.auth === 'enabled') {
+                document.getElementById('logout-link').style.display = 'inline';
+            }
+        }).catch(() => {});
     </script>
 </body>
 </html>
