@@ -284,7 +284,9 @@
     </div>
 
     <script>
-        const API_URL = new URL('/api', window.location.origin).toString().replace(/\/$/, '');
+        const API_URL = new URL('/api', window.location.origin).toString();
+        const DEFAULT_MAX_GPU_TEMP_C = 75;
+        const TIMELINE_WIDTH = 600;
         const MAX_TEMP_HISTORY_SAMPLES = 48;
         const REFRESH_INTERVAL_MS = 5000;
         const MAX_ONLINE_MODELS_DISPLAY = 10;
@@ -329,19 +331,19 @@
 
         function renderTimeline(maxTemp) {
             const svg = document.getElementById('timeline');
-            const limit = Number.isFinite(Number(maxTemp)) && Number(maxTemp) > 0 ? Number(maxTemp) : 75;
+            const limit = Number.isFinite(Number(maxTemp)) && Number(maxTemp) > 0 ? Number(maxTemp) : DEFAULT_MAX_GPU_TEMP_C;
             if (!tempHistory.length) {
                 svg.innerHTML = '<text x="24" y="68" fill="#789" font-size="13">Waiting for GPU temperature samples…</text>';
                 return;
             }
             const points = tempHistory.map((v, i) => {
-                const x = tempHistory.length === 1 ? 300 : (i / (tempHistory.length - 1)) * 600;
+                const x = tempHistory.length === 1 ? TIMELINE_WIDTH / 2 : (i / (tempHistory.length - 1)) * TIMELINE_WIDTH;
                 const y = 105 - (Math.max(0, Math.min(limit, v)) / limit) * 90;
                 return `${x.toFixed(1)},${y.toFixed(1)}`;
             }).join(' ');
             const thresholdY = 105 - (limit / limit) * 90;
             svg.innerHTML = `
-                <line x1="0" y1="${thresholdY}" x2="600" y2="${thresholdY}" stroke="rgba(255,107,107,.45)" stroke-dasharray="8 8"></line>
+                <line x1="0" y1="${thresholdY}" x2="${TIMELINE_WIDTH}" y2="${thresholdY}" stroke="rgba(255,107,107,.45)" stroke-dasharray="8 8"></line>
                 <polyline points="${points}" fill="none" stroke="#00d4ff" stroke-width="3"></polyline>
                 <text x="16" y="22" fill="#8aa" font-size="12">GPU temp history</text>
             `;
@@ -356,11 +358,13 @@
             setGauge('ram', data.memory || 0);
             const gpu = data.gpu || {};
             if (gpu.available) {
-                const maxTemp = gpu.max_temp_c || 75;
+                const maxTemp = gpu.max_temp_c || DEFAULT_MAX_GPU_TEMP_C;
                 const temp = Number(gpu.temp_c);
                 const tempPct = maxTemp ? (temp / maxTemp) * 100 : 0;
                 const cls = tempClass(temp, maxTemp, gpu.thermal_margin || 5);
-                document.getElementById('gpu-val').innerHTML = `<span class="${cls}">${temp.toFixed(0)}°C</span>`;
+                const gpuValue = document.getElementById('gpu-val');
+                gpuValue.textContent = `${temp.toFixed(0)}°C`;
+                gpuValue.className = cls;
                 const warnPct = ((maxTemp - (gpu.thermal_margin || 5)) / maxTemp) * 100;
                 setGauge('gpu', tempPct, `${temp.toFixed(0)}°C`, 100, warnPct);
                 const vramPct = gpu.mem_total_mb ? (gpu.mem_used_mb / gpu.mem_total_mb) * 100 : 0;
@@ -373,7 +377,7 @@
                 document.getElementById('gpu-val').textContent = 'n/a';
                 document.getElementById('vram-val').textContent = 'n/a';
                 document.getElementById('local-state').textContent = 'no telemetry';
-                renderTimeline(75);
+                renderTimeline(DEFAULT_MAX_GPU_TEMP_C);
             }
             document.getElementById('updated').textContent = new Date().toLocaleTimeString();
         }
