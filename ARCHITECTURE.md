@@ -266,6 +266,28 @@ Each bot:
 - Alerts include learning snippets
 - Grows your knowledge over time
 
+### 7. **Repo Mirror System** (`repos.json`, `scripts/sync_repos.py`, `repo_mirror.py`)
+- `repos.json` is the single source of truth for every repo in the fleet
+  (condensers, bots, knowledge sources) — name, owner, and a `tag`.
+- `scripts/sync_repos.py` clones (or `git pull`s) every repo in `repos.json`
+  into a local mirror directory, cross-platform (Linux/macOS/Windows).
+  The mirror location is controlled by, in order of precedence:
+  1. `--base-dir` CLI flag
+  2. `JACKY_REPOS_DIR` environment variable
+  3. `base_dir` field in `repos.json`
+  4. default: `data/repo_mirror/`
+  After each run it writes `data/repo_mirror_status.json` (per-repo
+  ok/error + `last_synced` timestamp).
+- `repo_mirror.py` is the shared helper any bot/agent imports to resolve a
+  repo's local mirror path (`get_local_repo_path(name)`) and check its last
+  sync status (`repo_status(name)`), so they can read from disk first and
+  only fall back to the GitHub API when no mirror exists. `bots/github_bot.py`
+  already uses this for its repo status lookups.
+- Mirrored repos themselves are never committed to `jacky` (`.gitignore`
+  covers `data/`, `repo_mirror/`, `repo_mirror_status.json`).
+- Run manually with `python scripts/sync_repos.py`, or schedule it daily
+  with `python daily_workflow.py --sync-repos` (see `OPERATIONAL_GUIDE.md`).
+
 ---
 
 ## Workflow Example
