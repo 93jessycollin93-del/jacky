@@ -1,3 +1,52 @@
+# OmniAgent Starter Kit for Jacky
+
+**OmniAgent** is a production-ready GitHub Copilot / MCP / VS Code agent starter kit layered into Jacky. It gives this repository reusable custom agents, skills, tools, MCP server configuration, templates, examples, tests, and CI so anyone can clone and extend a tool-rich autonomous AI agent.
+
+## OmniAgent Highlights
+
+- Custom Copilot agent definition in `.github/agents/OmniAgent.agent.md`.
+- Specialized role agents in `agents/` for coding, research, testing, DevOps, and accessibility.
+- Reusable skills in `skills/` with YAML frontmatter, scripts, references, and assets.
+- MCP server starter configuration in `mcp-servers/omniagent.mcp.json`.
+- Sample custom tools in `tools/` using Python and Node.js built-ins.
+- Prompt patterns, PR templates, verification checklists, diagrams, and icons in `assets/`.
+- Documentation in `docs/` and runnable structure tests in `tests/`.
+- GitHub Actions workflow in `.github/workflows/omniagent-ci.yml` for starter-kit validation.
+
+## OmniAgent Quickstart
+
+```bash
+cd /path/to/jacky
+python -m pip install -r requirements.txt
+python -m pytest tests/test_omniagent_structure.py
+python tools/sample_file_tool.py README.md --max-lines 12
+```
+
+To connect MCP-capable clients, adapt `mcp-servers/omniagent.mcp.json` and provide credentials through environment variables such as `GITHUB_TOKEN`; never commit real tokens.
+
+## Invoking Agents and Skills
+
+- Start with `.github/agents/OmniAgent.agent.md` for broad autonomous tasks.
+- Use `agents/coder.agent.md` for implementation, `agents/researcher.agent.md` for cited research, `agents/tester.agent.md` for verification, `agents/devops.agent.md` for CI/CD, and `agents/accessibility.agent.md` for UI review.
+- Invoke skills by matching task intent to `skills/<name>/SKILL.md`:
+  - `web-research` for current external facts and citations.
+  - `code-refactor` for safe structural code changes.
+  - `security-review` for threat modeling, dependency checks, and secret safety.
+
+## OmniAgent Operating Loop
+
+1. Plan first with acceptance criteria and risks.
+2. Select the smallest relevant role agent, skill, and tool.
+3. Execute in small steps using repository-local commands.
+4. Verify with tests, CI, security scans, and accessibility checks as applicable.
+5. Reflect, iterate only when needed, and summarize evidence.
+
+## Available Tool Categories
+
+File operations, shell commands, GitHub API, code search, web fetch, browser automation, MCP extensions, dependency advisories, secret scanning, CodeQL/static analysis, reusable prompts, and custom scripts are all represented in the starter kit.
+
+---
+
 # JACKY - AI Operations Manager
 
 **Frame:** It's Jacky's PC. You learn from Jacky.

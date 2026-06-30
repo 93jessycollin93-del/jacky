@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">OmniAgent icon</title>
+  <desc id="desc">A circular node network representing an AI agent ecosystem.</desc>
+  <circle cx="64" cy="64" r="56" fill="#0f172a"/>
+  <circle cx="64" cy="64" r="18" fill="#38bdf8"/>
+  <g fill="#a7f3d0">
+    <circle cx="32" cy="32" r="8"/><circle cx="96" cy="32" r="8"/><circle cx="32" cy="96" r="8"/><circle cx="96" cy="96" r="8"/>
+  </g>
+  <g stroke="#e0f2fe" stroke-width="4"><path d="M40 40l16 16M88 40L72 56M40 88l16-16M88 88L72 72"/></g>
+</svg>

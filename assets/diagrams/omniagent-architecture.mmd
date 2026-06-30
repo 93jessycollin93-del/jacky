@@ -1,0 +1,8 @@
+flowchart TD
+  User[User / Issue / PR] --> Omni[OmniAgent]
+  Omni --> Skills[Skills]
+  Omni --> Agents[Specialized Agents]
+  Omni --> Tools[Built-in Tools]
+  Tools --> MCP[MCP Servers]
+  Omni --> Verify[Tests / CI / Security / A11y]
+  Verify --> Report[Summary / PR]

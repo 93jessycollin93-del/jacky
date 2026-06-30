@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "example-local-tool": {
+      "command": "python",
+      "args": ["tools/sample_file_tool.py", "README.md"],
+      "purpose": "Demonstrates wrapping a repository utility as a tool"
+    }
+  }
+}

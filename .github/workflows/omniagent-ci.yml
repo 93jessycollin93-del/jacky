@@ -1,0 +1,37 @@
+name: OmniAgent CI
+
+on:
+  pull_request:
+    paths:
+      - '.github/agents/**'
+      - 'agents/**'
+      - 'skills/**'
+      - 'tools/**'
+      - 'mcp-servers/**'
+      - 'assets/**'
+      - 'docs/**'
+      - 'examples/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install pytest
+      - name: Run structure tests
+        run: python -m pytest tests/test_omniagent_structure.py
+      - name: Run sample security preflight
+        run: python skills/security-review/scripts/security_check.py .github/agents/OmniAgent.agent.md agents skills tools mcp-servers assets docs examples tests
