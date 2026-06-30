@@ -7,24 +7,33 @@
     "cloud_bots": {
       "enabled": true,
       "providers": [
-        "groq",
+        "vertex_ai",
+        "copilot",
         "gemini",
-        "xai"
+        "xai",
+        "groq",
+        "emergent"
       ]
     }
   },
   "cloud_providers": {
-    "groq": {
-      "enabled": true
-    },
-    "gemini": {
-      "enabled": false
-    },
-    "openrouter": {
-      "enabled": false
-    }
+    "vertex_ai": { "enabled": true },
+    "copilot":   { "enabled": true },
+    "groq":      { "enabled": true },
+    "gemini":    { "enabled": true },
+    "xai":       { "enabled": true },
+    "emergent":  { "enabled": true },
+    "openrouter":{ "enabled": false }
   },
   "provider_limits": {
+    "vertex_ai": {
+      "max_tokens_per_minute": 100000,
+      "max_requests_per_minute": 300
+    },
+    "copilot": {
+      "max_tokens_per_minute": 40000,
+      "max_requests_per_minute": 100
+    },
     "xai": {
       "max_tokens_per_minute": 60000,
       "max_requests_per_minute": 100
@@ -37,10 +46,36 @@
       "max_tokens_per_minute": 15000,
       "max_requests_per_minute": 60
     },
+    "emergent": {
+      "max_tokens_per_minute": 20000,
+      "max_requests_per_minute": 50
+    },
     "openrouter": {
       "max_tokens_per_minute": 100000,
       "max_requests_per_minute": 200
     }
+  },
+  "credits": {
+    "vertex_ai": {
+      "balance_usd": 415,
+      "currency": "CAD",
+      "expires": "2026-09-22",
+      "note": "Google Cloud prepay credits — burn before expiry"
+    },
+    "emergent": {
+      "balance_credits": 100,
+      "reset": "monthly",
+      "note": "100 credits/month Standard Plan"
+    }
+  },
+  "cost_per_token": {
+    "vertex_ai":  0.000000075,
+    "gemini":     0.000000075,
+    "xai":        0.000005,
+    "groq":       0.0,
+    "emergent":   0.0,
+    "copilot":    0.0,
+    "openrouter": 0.000001
   },
   "power_mode": "performance",
   "runtime_controls": {

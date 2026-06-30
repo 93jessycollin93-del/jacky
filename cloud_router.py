@@ -16,10 +16,11 @@ Frame: It's Jacky's PC. Free clouds first, local last.
 
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 from secrets_loader import get_keys  # vault-aware, lazy secret resolution
 
@@ -50,12 +51,92 @@ PROVIDER_KEYS = {
     "groq":       ["GROQ_API_KEY_1", "GROQ_API_KEY_2", "GROQ_API_KEY_3"],
     "gemini":     ["GEMINI_API_KEY"],
     "openrouter": ["OPENROUTER_API_KEY"],
+    # Jun 2026 subscriptions
+    "vertex_ai":  ["GOOGLE_CLOUD_API_KEY"],   # VERTEX_AI_PROJECT_ID loaded by CloudClient
+    "emergent":   ["EMERGENT_API_KEY"],
+    "copilot":    ["GITHUB_COPILOT_TOKEN"],
     # Wired but inactive until a key is added to the vault (secrets.env).
     "deepinfra":  ["DEEPINFRA_API_KEY_1", "DEEPINFRA_API_KEY_2"],
     "fireworks":  ["FIREWORKS_API_KEY_1", "FIREWORKS_API_KEY_2"],
     "lambda":     ["LAMBDA_API_KEY_1", "LAMBDA_API_KEY_2"],
     "runpod":     ["RUNPOD_API_KEY_1", "RUNPOD_API_KEY_2"],
 }
+
+# Default provider preference per task type.
+# Providers listed left-to-right = most preferred first.
+# Credit-burn priority layer (CreditBurnPolicy) may re-sort at runtime.
+TASK_PROVIDER_ORDER = {
+    "code":      ["copilot", "vertex_ai", "xai", "gemini", "groq"],
+    "research":  ["vertex_ai", "gemini", "xai", "groq", "copilot"],
+    "reasoning": ["vertex_ai", "xai", "gemini", "groq"],
+    "general":   ["vertex_ai", "gemini", "groq", "xai"],
+}
+
+# Keyword patterns for lightweight task classification (no LLM call).
+_TASK_PATTERNS = {
+    "code": re.compile(
+        r"\b(def |class |import |function|bug|error|exception|test|refactor|"
+        r"debug|syntax|compile|lint|snippet|script|module|api endpoint|"
+        r"write.*code|fix.*code|implement|algorithm)\b", re.IGNORECASE),
+    "research": re.compile(
+        r"\b(explain|summarize|summary|what is|what are|find|search|"
+        r"history|overview|describe|tell me about|list|examples of)\b", re.IGNORECASE),
+    "reasoning": re.compile(
+        r"\b(analyze|compare|plan|design|should I|why|trade.?off|"
+        r"pros and cons|recommend|evaluate|assess|strategy|decide)\b", re.IGNORECASE),
+}
+
+
+def classify_task(prompt: str) -> str:
+    """Classify a prompt into a task type using keyword matching. Never raises."""
+    if not prompt:
+        return "general"
+    for task, pattern in _TASK_PATTERNS.items():
+        if pattern.search(prompt):
+            return task
+    return "general"
+
+
+class CreditBurnPolicy:
+    """Re-orders the provider list to burn expiring credits first,
+    without degrading quality for the given task type."""
+
+    # Which task types each provider is considered capable enough for
+    # credit-burn prioritization (won't bump to top for tasks not in its set).
+    _CAPABLE_FOR = {
+        "vertex_ai": {"code", "research", "reasoning", "general"},
+        "emergent":  {"research", "general"},
+        "copilot":   {"code"},
+    }
+
+    def __init__(self, config: dict):
+        self.credits = config.get("credits", {})
+
+    def _days_until_expiry(self, provider: str) -> Optional[int]:
+        cfg = self.credits.get(provider, {})
+        expires_str = cfg.get("expires")
+        if not expires_str:
+            return None
+        try:
+            exp = date.fromisoformat(expires_str)
+            return (exp - date.today()).days
+        except ValueError:
+            return None
+
+    def _is_expiring_soon(self, provider: str, threshold_days: int = 90) -> bool:
+        days = self._days_until_expiry(provider)
+        return days is not None and days <= threshold_days
+
+    def prioritize_expiring(self, order: List[str], task_type: str = "general") -> List[str]:
+        """Return a re-sorted copy that puts expiring-credit providers first,
+        but only when they're capable for the given task type."""
+        expiring = [
+            p for p in order
+            if self._is_expiring_soon(p)
+            and task_type in self._CAPABLE_FOR.get(p, set())
+        ]
+        rest = [p for p in order if p not in expiring]
+        return expiring + rest
 
 
 class UsageTracker:
@@ -119,8 +200,55 @@ class UsageTracker:
         return self.usage.get(provider, {
             "tokens_used": 0,
             "requests_made": 0,
+            "cost_usd": 0.0,
+            "credits_consumed": 0,
             "last_reset": datetime.now().isoformat(),
         })
+
+    def record_cost(self, provider: str, tokens: int, cost_per_token: float,
+                    credits: int = 0):
+        """Record estimated cost + credits consumed for a request."""
+        if provider not in self.usage:
+            self.usage[provider] = {
+                "tokens_used": 0, "requests_made": 0,
+                "cost_usd": 0.0, "credits_consumed": 0,
+                "last_reset": datetime.now().isoformat(),
+            }
+        self.usage[provider].setdefault("cost_usd", 0.0)
+        self.usage[provider].setdefault("credits_consumed", 0)
+        self.usage[provider]["cost_usd"] += tokens * cost_per_token
+        self.usage[provider]["credits_consumed"] += credits
+        self.save()
+
+    def credit_burn_rate(self, provider: str) -> dict:
+        """Estimate daily burn rate and days remaining for a credited provider."""
+        stats = self.usage.get(provider, {})
+        first_seen_str = stats.get("first_seen")
+        if not first_seen_str:
+            return {"daily_tokens": 0, "days_remaining": None}
+        try:
+            first_seen = datetime.fromisoformat(first_seen_str)
+            days_elapsed = max((datetime.now() - first_seen).days, 1)
+            total_tokens = stats.get("tokens_used", 0)
+            daily = total_tokens / days_elapsed
+            return {"daily_tokens": round(daily), "days_elapsed": days_elapsed}
+        except Exception:
+            return {"daily_tokens": 0, "days_remaining": None}
+
+    def monthly_summary(self, cost_per_token_cfg: dict = None) -> dict:
+        """Return a summary of cost + usage per provider for the current month."""
+        cpt = cost_per_token_cfg or {}
+        summary = {}
+        for provider, stats in self.usage.items():
+            tokens = stats.get("tokens_used", 0)
+            cost = stats.get("cost_usd", tokens * cpt.get(provider, 0.0))
+            summary[provider] = {
+                "tokens_used": tokens,
+                "requests_made": stats.get("requests_made", 0),
+                "estimated_cost_usd": round(cost, 6),
+                "credits_consumed": stats.get("credits_consumed", 0),
+            }
+        return summary
 
 
 class CloudRouter:
@@ -130,6 +258,7 @@ class CloudRouter:
         self.config = self._load_config()
         self.order = self._provider_order()
         self.tracker = UsageTracker()
+        self.credit_policy = CreditBurnPolicy(self.config)
         self.current_provider = self.order[0] if self.order else None
 
     def _load_config(self) -> dict:
@@ -202,50 +331,64 @@ class CloudRouter:
             }
         return report
 
+    def _task_ordered_providers(self, task_type: str) -> List[str]:
+        """Return the provider list for this task type, filtered to enabled+keyed
+        providers, then re-sorted for credit-burn priority."""
+        # Start from TASK_PROVIDER_ORDER; fall back to config order.
+        preferred = TASK_PROVIDER_ORDER.get(task_type, self.order)
+        # Only keep providers that are enabled (in config order).
+        enabled = set(self.order)
+        ordered = [p for p in preferred if p in enabled]
+        # Add any enabled providers not in the task-specific list (as fallbacks).
+        for p in self.order:
+            if p not in ordered:
+                ordered.append(p)
+        # Apply credit-burn priority: bump expiring-credit providers to the front.
+        return self.credit_policy.prioritize_expiring(ordered, task_type)
+
     def ask(self, prompt: str, system: Optional[str] = None,
-            max_tokens: int = 512) -> dict:
-        """Try enabled providers, with proactive rotation based on usage limits."""
+            max_tokens: int = 512, task_type: Optional[str] = None) -> dict:
+        """Route prompt to best provider. task_type overrides auto-classification."""
         from cloud_client import CloudClient, CloudError  # local import; SSL via truststore
 
-        tried = []
-        rotation_attempts = 0
-        max_rotations = len(self.order)
+        if task_type is None:
+            task_type = classify_task(prompt)
 
-        # Start with current provider; rotate if needed.
-        while rotation_attempts < max_rotations:
-            if self._should_rotate(self.current_provider):
-                if not self._rotate_to_next():
-                    break
-                rotation_attempts += 1
+        order = self._task_ordered_providers(task_type)
+        cost_per_token_cfg = self.config.get("cost_per_token", {})
+
+        tried = []
+        for provider in order:
+            if self._should_rotate(provider):
+                tried.append({"provider": provider, "skipped": "at limit"})
                 continue
 
-            keys = self._keys_for(self.current_provider)
+            keys = self._keys_for(provider)
             if not keys:
-                tried.append({"provider": self.current_provider, "skipped": "no keys"})
-                if not self._rotate_to_next():
-                    break
-                rotation_attempts += 1
+                tried.append({"provider": provider, "skipped": "no keys"})
                 continue
 
             try:
-                client = CloudClient(self.current_provider, keys)
+                client = CloudClient(provider, keys)
                 result = client.timed_generate(prompt, system=system, max_tokens=max_tokens)
-                result["tried"] = tried
                 if result.get("status") == "ok":
-                    # Record successful usage (real tokenization when available)
-                    token_estimate = count_tokens(prompt) + count_tokens(result.get("response", ""))
-                    self.tracker.record(self.current_provider, token_estimate, success=True)
+                    tokens = count_tokens(prompt) + count_tokens(result.get("response", ""))
+                    self.tracker.record(provider, tokens, success=True)
+                    cost_per_tok = cost_per_token_cfg.get(provider, 0.0)
+                    self.tracker.record_cost(provider, tokens, cost_per_tok)
+                    self.current_provider = provider
+                    result["tried"] = tried
+                    result["task_type"] = task_type
+                    result["routing_reason"] = (
+                        f"task={task_type}; credit-priority={provider in [p for p in order[:2]]}"
+                    )
                     return result
-                tried.append({"provider": self.current_provider, "error": result.get("response")})
+                tried.append({"provider": provider, "error": result.get("response")})
             except Exception as e:
-                tried.append({"provider": self.current_provider, "error": str(e)})
-
-            # Failed; try next provider
-            if not self._rotate_to_next():
-                break
-            rotation_attempts += 1
+                tried.append({"provider": provider, "error": str(e)})
 
         return {"status": "error", "engine": "cloud", "tried": tried,
+                "task_type": task_type,
                 "response": "All enabled cloud providers failed or have no keys."}
 
 
