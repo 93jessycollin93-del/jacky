@@ -323,16 +323,17 @@
 
         function renderTimeline(maxTemp) {
             const svg = document.getElementById('timeline');
+            const limit = Number.isFinite(Number(maxTemp)) && Number(maxTemp) > 0 ? Number(maxTemp) : 75;
             if (!tempHistory.length) {
                 svg.innerHTML = '<text x="24" y="68" fill="#789" font-size="13">Waiting for GPU temperature samples…</text>';
                 return;
             }
             const points = tempHistory.map((v, i) => {
-                const x = tempHistory.length === 1 ? 0 : (i / (tempHistory.length - 1)) * 600;
-                const y = 105 - (Math.max(0, Math.min(maxTemp || 100, v)) / (maxTemp || 100)) * 90;
+                const x = tempHistory.length === 1 ? 300 : (i / (tempHistory.length - 1)) * 600;
+                const y = 105 - (Math.max(0, Math.min(limit, v)) / limit) * 90;
                 return `${x.toFixed(1)},${y.toFixed(1)}`;
             }).join(' ');
-            const thresholdY = 105 - ((maxTemp || 75) / (maxTemp || 100)) * 90;
+            const thresholdY = 105 - (limit / limit) * 90;
             svg.innerHTML = `
                 <line x1="0" y1="${thresholdY}" x2="600" y2="${thresholdY}" stroke="rgba(255,107,107,.45)" stroke-dasharray="8 8"></line>
                 <polyline points="${points}" fill="none" stroke="#00d4ff" stroke-width="3"></polyline>
@@ -386,6 +387,7 @@
 
         async function loadBots() {
             const response = await fetch(`${API_URL}/bots`);
+            if (handle401(response)) return;
             if (!response.ok) throw new Error('bots unavailable');
             const data = await response.json();
             const bots = data.bots || [];
@@ -397,6 +399,7 @@
 
         async function loadModels() {
             const response = await fetch(`${API_URL}/models`);
+            if (handle401(response)) return;
             if (!response.ok) throw new Error('models unavailable');
             const data = await response.json();
             const online = data.online || [];
