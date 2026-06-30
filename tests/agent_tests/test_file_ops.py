@@ -107,7 +107,8 @@ def test_list_files_returns_py_files():
 
 def test_list_files_excludes_hidden():
     files = list_files(".", "**/*")
-    assert not any(part.startswith(".") for f in files for part in pathlib.Path(f).parts)
+    # Only filenames starting with '.' should be excluded, not files inside hidden dirs
+    assert not any(pathlib.Path(f).name.startswith(".") for f in files)
 
 
 # ── delete_file ──────────────────────────────────────────────────────────────

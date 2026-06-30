@@ -23,7 +23,7 @@ def _headers() -> dict[str, str]:
         "User-Agent": "OmniAgent/1.0",
     }
     if _TOKEN:
-        h["Authorization"] = f"******"
+        h["Authorization"] = "token " + _TOKEN
     return h
 
 

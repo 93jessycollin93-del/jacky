@@ -123,7 +123,10 @@ def main() -> None:
         params = msg.get("params", {})
 
         if method == "initialize":
-            _send(_ok(msg_id, {"capabilities": _CAPABILITIES, "serverInfo": {"name": "jacky-mcp-server", "version": "1.0"}}))
+            _send(_ok(msg_id, {
+                "capabilities": _CAPABILITIES,
+                "serverInfo": {"name": "jacky-mcp-server", "version": "1.0"},
+            }))
         elif method == "tools/call":
             tool_name = params.get("name", "")
             tool_params = params.get("arguments", {})

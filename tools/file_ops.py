@@ -89,7 +89,7 @@ def list_files(
     for p in d.glob(pattern):
         if not p.is_file():
             continue
-        if exclude_hidden and any(part.startswith(".") for part in p.parts):
+        if exclude_hidden and p.name.startswith("."):
             continue
         results.append(str(p.relative_to(_REPO_ROOT)))
     return sorted(results)

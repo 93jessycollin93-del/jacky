@@ -22,7 +22,10 @@ def parse_frontmatter(text: str) -> dict:
     """Very simple YAML front-matter parser (no external deps)."""
     if not text.startswith("---"):
         return {}
-    end = text.index("---", 3)
+    try:
+        end = text.index("---", 3)
+    except ValueError:
+        return {}
     fm_block = text[3:end].strip()
     result: dict = {}
     for line in fm_block.splitlines():

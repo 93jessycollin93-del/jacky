@@ -73,10 +73,10 @@ jobs:
         run: |
           pip install flake8 --quiet
           flake8 . --max-line-length=120 --exclude=.git,__pycache__,venv \
-            --per-file-ignores="tests/*:E501" || true
+            --per-file-ignores="tests/*:E501"
 
       - name: Run tests
-        run: python -m pytest tests/ -v --tb=short || true
+        run: python -m pytest tests/ -v --tb=short
 
   # ── Nightly health check ───────────────────────────────────────────────────
   nightly-health:
