@@ -359,3 +359,57 @@ Use the calibration framework to audit existing nodes. What's been learned so fa
 
 **Ready to implement?** Start with Upgrade 1 (multi-scale extraction). Takes 4 hours, immediate visible benefit.
 
+---
+
+## UI Integration — Condenser Suite (added)
+
+The three condenser components now have dedicated, additive front-end pages under the
+`sas_ui/` PWA shell, reachable from the Hub ("Jacky Hub — Command Center" at `/hub`).
+None of the underlying logic in `bots/condenser_bot.py`, `condenser_benchmark.py`, or
+`condenser_adversary.py` was changed — every page is a thin wrapper that calls the
+existing functions through new, read-only-by-default JSON API routes in `jacky_api.py`.
+
+| Page | Route | Wraps | Page file |
+|---|---|---|---|
+| Condenser console | `/condenser` | `bots/condenser_bot.py` (`compress`, `CondenserBot`) | `sas_ui/condenser.html` |
+| Benchmark scorecard | `/condenser/benchmark` | `condenser_benchmark.py` (`run_benchmark`) | `sas_ui/condenser_benchmark.html` |
+| Adversary brittleness map | `/condenser/adversary` | `condenser_adversary.py` (`single_action_impacts`, `greedy_attack`) | `sas_ui/condenser_adversary.html` |
+
+API routes: `/api/condenser/specializations`, `/api/condenser/compress`,
+`/api/condenser/stars`, `/api/condenser/benchmark`, `/api/condenser/adversary`.
+
+### Threat model (read before relaxing any of this)
+
+This is a real, internet-exposed surface (Cloudflare Tunnel), not a demo. Treat every
+condenser route as production-facing:
+
+- **Auth is global, not opt-in.** Every condenser route is covered by the existing
+  `_gate()` `before_request` hook in `jacky_api.py` — nothing here is in `_OPEN_PATHS`.
+  If `SAS_ACCESS_TOKEN` is unset, the whole app (including condenser routes) runs
+  open on LAN only; it refuses to bind to a public interface without a token.
+- **Rate limiting.** A dependency-free in-process sliding-window limiter
+  (`rate_limit()` in `jacky_api.py`) caps `/api/condenser/compress` (20/min),
+  `/api/condenser/stars` (60/min), `/api/condenser/benchmark` (10/min), and
+  `/api/condenser/adversary` (5/min — it's the most compute-heavy) per client IP.
+- **Input size caps.** `/api/condenser/compress` rejects text over 20,000 characters
+  (413) before it ever reaches `compress()`, since that function's cost scales with
+  input size and arbitrary text is a DoS vector.
+- **Bounded compute parameters.** `/api/condenser/benchmark` clamps `samples` to
+  20–300; `/api/condenser/adversary` clamps `budget` to 1–5 and `keep` to 0.05–0.9 —
+  both modules document the upstream CLI as "stdlib only, runs in <1s–few seconds",
+  but the API must enforce its own ceiling independent of caller-supplied values.
+- **No stored XSS.** `compress()` echoes fragments of arbitrary user-submitted text
+  back in `core_signal` / `structure` / `depth`. Every front-end page renders these
+  fields with `textContent`, never `innerHTML`, so reflected/stored markup in
+  condensed text cannot execute as script.
+- **No new write surface beyond what already existed.** The condenser API only adds
+  one write path (`/api/condenser/compress` optionally saving a "star" to
+  `data/condensers.db`, the same DB and method the bot already used standalone);
+  benchmark and adversary endpoints are read-only computations and do not write to
+  `data/`.
+
+If you add a fourth condenser page later, follow the same pattern: wrap, don't modify;
+gate through the existing `_gate()`; rate-limit any endpoint whose cost scales with
+caller input; cap input size; render all dynamic text with `textContent`.
+
+

@@ -28,6 +28,38 @@ except Exception as _e:
     squad_manager = None
     log.warning(f"SquadManager unavailable: {_e}")
 
+# Knowledge Condenser suite — wrapped, never modified. Each import is isolated
+# so a failure in one condenser module can't take down the API or the others.
+try:
+    from bots.condenser_bot import compress as condenser_compress, CondenserBot, SPECIALIZATIONS as CONDENSER_SPECIALIZATIONS
+    _condenser_bot = CondenserBot()
+    log.info("CondenserBot loaded.")
+except Exception as _e:
+    condenser_compress = None
+    CONDENSER_SPECIALIZATIONS = {}
+    _condenser_bot = None
+    log.warning(f"CondenserBot unavailable: {_e}")
+
+try:
+    from condenser_benchmark import run_benchmark, FrequencyCondenser
+    log.info("condenser_benchmark loaded.")
+except Exception as _e:
+    run_benchmark = None
+    FrequencyCondenser = None
+    log.warning(f"condenser_benchmark unavailable: {_e}")
+
+try:
+    from condenser_adversary import single_action_impacts, greedy_attack, attack_to_probs, failure_of, ACTIONS, N_ACTIONS
+    log.info("condenser_adversary loaded.")
+except Exception as _e:
+    single_action_impacts = None
+    greedy_attack = None
+    attack_to_probs = None
+    failure_of = None
+    ACTIONS = []
+    N_ACTIONS = 0
+    log.warning(f"condenser_adversary unavailable: {_e}")
+
 JACKY_HOME = Path(__file__).parent
 SAS_UI_PATH = JACKY_HOME / "sas_ui"
 TOOLS_DIR = r"E:\AI\ai-agents\tools"
@@ -107,6 +139,41 @@ def _gate():
     if path.startswith("/api"):
         return jsonify({"error": "unauthorized", "login": "/login"}), 401
     return redirect("/login")
+
+
+# ----------------------------------------------------------------------------
+# RATE LIMITER — lightweight, dependency-free, in-process sliding window.
+# Used to gate compute-heavy / arbitrary-input endpoints (e.g. condenser
+# compression, benchmark, adversary simulation) against abuse/DoS, since
+# this app is internet-exposed via the Cloudflare Tunnel.
+# ----------------------------------------------------------------------------
+import threading as _threading
+from collections import deque as _deque
+
+_rate_lock = _threading.Lock()
+_rate_buckets = {}
+
+def rate_limit(max_calls=20, window_seconds=60):
+    """Decorator: caps calls per (client identity, endpoint) within a sliding window."""
+    def decorator(fn):
+        @wraps(fn)
+        def wrapped(*args, **kwargs):
+            ident = request.remote_addr or "anon"
+            key = (ident, fn.__name__)
+            now = datetime.utcnow().timestamp()
+            with _rate_lock:
+                bucket = _rate_buckets.setdefault(key, _deque())
+                while bucket and now - bucket[0] > window_seconds:
+                    bucket.popleft()
+                if len(bucket) >= max_calls:
+                    retry_after = max(1, int(window_seconds - (now - bucket[0])))
+                    return jsonify({"error": "rate_limited",
+                                    "message": f"Too many requests. Retry in {retry_after}s.",
+                                    "retry_after": retry_after}), 429
+                bucket.append(now)
+            return fn(*args, **kwargs)
+        return wrapped
+    return decorator
 
 # ----------------------------------------------------------------------------
 # LIVE AI ENGINE — local-first. Built once at import; cloud stays OFF.
@@ -1060,6 +1127,171 @@ def hub():
     if hub_file.exists():
         return send_file(str(hub_file))
     return jsonify({"error": "Hub UI not found — build hub.html first"}), 404
+
+# ============================================================================
+# CONDENSER SUITE
+# Wraps bots/condenser_bot.py, condenser_benchmark.py and condenser_adversary.py
+# as pages + JSON APIs, without changing a single line of their logic. Every
+# route here is already covered by the global auth gate (_gate, above) since
+# none of these paths appear in _OPEN_PATHS. Compute-heavy / arbitrary-input
+# endpoints are additionally rate-limited and size-capped against abuse.
+# ============================================================================
+
+CONDENSER_MAX_INPUT_CHARS = 20000  # hard cap on text submitted for compression
+
+
+@app.route('/condenser', methods=['GET'])
+def condenser_page():
+    """Condenser Bot console — live compression of knowledge signals."""
+    f = SAS_UI_PATH / "condenser.html"
+    if f.exists():
+        return send_file(str(f))
+    return jsonify({"error": "Condenser UI not found"}), 404
+
+
+@app.route('/condenser/benchmark', methods=['GET'])
+def condenser_benchmark_page():
+    """Condenser Benchmark scorecard (graph reconstruction, invariants, etc.)."""
+    f = SAS_UI_PATH / "condenser_benchmark.html"
+    if f.exists():
+        return send_file(str(f))
+    return jsonify({"error": "Condenser benchmark UI not found"}), 404
+
+
+@app.route('/condenser/adversary', methods=['GET'])
+def condenser_adversary_page():
+    """Adversarial co-evolution — brittleness map + learned-attack results."""
+    f = SAS_UI_PATH / "condenser_adversary.html"
+    if f.exists():
+        return send_file(str(f))
+    return jsonify({"error": "Condenser adversary UI not found"}), 404
+
+
+@app.route('/api/condenser/specializations', methods=['GET'])
+def api_condenser_specializations():
+    """Available condenser specializations (density + symbolic tag)."""
+    if not condenser_compress:
+        return jsonify({"error": "condenser bot unavailable"}), 503
+    return jsonify({"specializations": CONDENSER_SPECIALIZATIONS})
+
+
+@app.route('/api/condenser/compress', methods=['POST'])
+@rate_limit(max_calls=20, window_seconds=60)
+def api_condenser_compress():
+    """Run the live knowledge condenser on submitted text (bots/condenser_bot.py)."""
+    if not condenser_compress or not _condenser_bot:
+        return jsonify({"error": "condenser bot unavailable"}), 503
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        return jsonify({"error": "text is required"}), 400
+    if len(text) > CONDENSER_MAX_INPUT_CHARS:
+        return jsonify({"error": f"text exceeds {CONDENSER_MAX_INPUT_CHARS} character limit"}), 413
+    specialization = data.get("specialization", "baseline")
+    if specialization not in CONDENSER_SPECIALIZATIONS:
+        specialization = "baseline"
+    try:
+        density = int(data.get("density", 0))
+    except (TypeError, ValueError):
+        density = 0
+    density = max(0, min(100, density))
+    save = bool(data.get("save", True))
+    try:
+        result = condenser_compress(text, density, specialization)
+        if save:
+            result["star_id"] = _condenser_bot.save_star(result, text)
+        return jsonify(result)
+    except Exception as e:
+        log.exception("condenser compress failed")
+        return jsonify({"error": "compression failed"}), 500
+
+
+@app.route('/api/condenser/stars', methods=['GET'])
+@rate_limit(max_calls=60, window_seconds=60)
+def api_condenser_stars():
+    """List previously saved condenser 'stars' from data/condensers.db."""
+    if not _condenser_bot:
+        return jsonify({"error": "condenser bot unavailable"}), 503
+    specialization = request.args.get("specialization") or None
+    if specialization and specialization not in CONDENSER_SPECIALIZATIONS:
+        return jsonify({"error": "unknown specialization"}), 400
+    try:
+        limit = max(1, min(100, int(request.args.get("limit", 20))))
+    except ValueError:
+        limit = 20
+    try:
+        return jsonify({"stars": _condenser_bot.list_stars(specialization, limit)})
+    except Exception:
+        log.exception("condenser list_stars failed")
+        return jsonify({"error": "could not list stars"}), 500
+
+
+@app.route('/api/condenser/benchmark', methods=['GET'])
+@rate_limit(max_calls=10, window_seconds=60)
+def api_condenser_benchmark():
+    """Run condenser_benchmark.run_benchmark() with bounded, safe parameters."""
+    if not run_benchmark:
+        return jsonify({"error": "condenser benchmark unavailable"}), 503
+    try:
+        samples = max(20, min(300, int(request.args.get("samples", 200))))
+    except ValueError:
+        samples = 200
+    try:
+        seed = int(request.args.get("seed", 0)) & 0xFFFFFFFF
+    except ValueError:
+        seed = 0
+    try:
+        results = run_benchmark(FrequencyCondenser, n_samples=samples, seed=seed)
+        # JSON object keys must be strings; per_noise is keyed by float noise levels.
+        results["per_noise"] = {str(k): v for k, v in results["per_noise"].items()}
+        return jsonify(results)
+    except Exception:
+        log.exception("condenser benchmark failed")
+        return jsonify({"error": "benchmark run failed"}), 500
+
+
+@app.route('/api/condenser/adversary', methods=['GET'])
+@rate_limit(max_calls=5, window_seconds=60)
+def api_condenser_adversary():
+    """Run the adversarial co-evolution layer with bounded, safe parameters."""
+    if not single_action_impacts:
+        return jsonify({"error": "condenser adversary unavailable"}), 503
+    import random as _random
+    try:
+        budget = max(1, min(5, int(request.args.get("budget", 3))))
+    except ValueError:
+        budget = 3
+    try:
+        keep = max(0.05, min(0.9, float(request.args.get("keep", 0.30))))
+    except ValueError:
+        keep = 0.30
+    kw = dict(keep=keep)
+    try:
+        base, rows = single_action_impacts(**kw)
+        chosen, learned_fail, gains = greedy_attack(budget=budget, **kw)
+        _, learned_ef, learned_iv = failure_of(chosen, **kw)
+        attack_names = [f"{ACTIONS[i][0]} {ACTIONS[i][1][0]}->{ACTIONS[i][1][1]}" for i in chosen]
+        rand_fs = []
+        rng = _random.Random(7)
+        for _ in range(10):
+            rc = rng.sample(range(N_ACTIONS), len(chosen)) if chosen else []
+            rand_fs.append(failure_of(rc, **kw)[0])
+        rand_fail = (sum(rand_fs) / len(rand_fs)) if rand_fs else 0.0
+        return jsonify({
+            "no_attack_failure": round(base, 3),
+            "brittleness_map": [
+                {"kind": r["kind"], "edge": f"{r['edge'][0]}->{r['edge'][1]}",
+                 "impact": round(r["impact"], 3)} for r in rows
+            ],
+            "greedy_attack": attack_names,
+            "marginal_gains": [round(g, 3) for g in gains],
+            "learned_failure": round(learned_fail, 3),
+            "random_failure": round(rand_fail, 3),
+            "learning_advantage": round(learned_fail - rand_fail, 3),
+        })
+    except Exception:
+        log.exception("condenser adversary failed")
+        return jsonify({"error": "adversary run failed"}), 500
 
 # ============================================================================
 # SQUAD API
