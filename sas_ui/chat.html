@@ -484,11 +484,73 @@
             return a ? (a.type + (a.cost === 'free' ? ' · free' : '')) : '';
         }
 
+        // ---- PERMANENT INPUT GUARD + RIGHT PANEL FIX ----
+        function ensureInputVisible() {
+            const input = document.getElementById('input');
+            const composer = document.querySelector('.composer-wrap');
+            const sendBtn = document.getElementById('send-btn');
+
+            if (input) {
+                input.style.display = '';
+                input.style.visibility = 'visible';
+                input.style.height = 'auto';
+                if (!input.value) input.placeholder = "Message your AI… (Enter to send, Shift+Enter for newline)";
+            }
+            if (composer) {
+                composer.style.display = 'flex';
+                composer.style.visibility = 'visible';
+            }
+            if (sendBtn) {
+                sendBtn.style.display = '';
+                sendBtn.style.visibility = 'visible';
+            }
+        }
+
+        function ensureRightPanelWired() {
+            const addSelect = document.getElementById('add-agent-select');
+            const addBtn = document.querySelectorAll('.add-btn')[0];
+            const activeAgent = document.getElementById('active-agent');
+
+            // Ensure all elements are clickable
+            if (addSelect) {
+                addSelect.style.pointerEvents = 'auto';
+                addSelect.style.cursor = 'pointer';
+                addSelect.disabled = false;
+                // Force onchange if not bound
+                if (!addSelect.onchange) {
+                    addSelect.addEventListener('change', () => {
+                        console.log('add-agent-select changed to:', addSelect.value);
+                    });
+                }
+            }
+            if (addBtn) {
+                addBtn.style.pointerEvents = 'auto';
+                addBtn.style.cursor = 'pointer';
+                // Force onclick if not bound
+                if (!addBtn.onclick) {
+                    addBtn.addEventListener('click', addParticipant);
+                }
+            }
+            if (activeAgent) {
+                activeAgent.style.pointerEvents = 'auto';
+                activeAgent.style.cursor = 'pointer';
+                activeAgent.disabled = false;
+            }
+        }
+
+        // Run every 500ms to catch any glitches
+        setInterval(() => { ensureInputVisible(); ensureRightPanelWired(); }, 500);
+
         // ---- INIT ----
         async function init() {
             if (!state.currentThreadId && state.threads[0]) {
                 state.currentThreadId = state.threads[0].id;
             }
+
+            // Force input visible immediately
+            ensureInputVisible();
+            ensureRightPanelWired();
+
             await loadAgents();
             await loadRuntime();
             renderThreads();
@@ -496,6 +558,12 @@
             renderParticipants();
             populateAgentSelects();
             bindInput();
+            ensureInputVisible();
+            ensureRightPanelWired();
+
+            // Wire up right panel after DOM updates
+            setTimeout(ensureRightPanelWired, 100);
+            setTimeout(ensureRightPanelWired, 500);
             fetch('/health').then(r => r.json()).then(d => {
                 if (d.auth === 'enabled') document.getElementById('logout-link').style.display = 'inline';
             }).catch(() => {});
@@ -534,10 +602,29 @@
             const opts = agents.filter(a => a.available !== false)
                 .map(a => `<option value="${a.id}">${a.name}${a.specialty ? ' · ' + a.specialty : ''}</option>`)
                 .join('');
-            active.innerHTML = opts;
-            add.innerHTML = '<option value="">Add an AI…</option>' + opts;
+
+            // Fallback: if agents list is empty, use hardcoded defaults
+            const fallbackOpts = `<option value="auto">Auto (Jacky Router)</option>
+<option value="local:qwen2.5:latest">qwen2.5:latest</option>
+<option value="local:dolphin-llama3:8b">dolphin-llama3:8b</option>
+<option value="local:qwen2.5-coder:14b">qwen2.5-coder:14b</option>
+<option value="local:qwen3.5:4b">qwen3.5:4b</option>
+<option value="cloud:groq">Groq (cloud)</option>`;
+
+            const finalOpts = opts || fallbackOpts;
+            active.innerHTML = finalOpts;
+            add.innerHTML = '<option value="">Add an AI…</option>' + finalOpts;
             active.value = t.activeAgent || 'auto';
-            document.getElementById('multi-reply').checked = !!t.multiReply;
+            active.disabled = false;
+            add.disabled = false;
+
+            // Force update both selects
+            active.style.pointerEvents = 'auto';
+            add.style.pointerEvents = 'auto';
+
+            if (document.getElementById('multi-reply')) {
+                document.getElementById('multi-reply').checked = !!t.multiReply;
+            }
         }
 
         function setActiveAgent(id) {
