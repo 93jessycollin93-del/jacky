@@ -17,6 +17,10 @@ data/
 *.err
 *.db
 
+# Mirrored repos (scripts/sync_repos.py) — local copies only, never committed
+repo_mirror/
+repo_mirror_status.json
+
 # Tunnel binary + runtime artifacts (don't commit the 52MB exe)
 bin/
 tunnel.log*
