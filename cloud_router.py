@@ -31,6 +31,11 @@ PROVIDER_KEYS = {
     "groq":       ["GROQ_API_KEY_1", "GROQ_API_KEY_2", "GROQ_API_KEY_3"],
     "gemini":     ["GEMINI_API_KEY"],
     "openrouter": ["OPENROUTER_API_KEY"],
+    # Wired but inactive until a key is added to the vault (secrets.env).
+    "deepinfra":  ["DEEPINFRA_API_KEY_1", "DEEPINFRA_API_KEY_2"],
+    "fireworks":  ["FIREWORKS_API_KEY_1", "FIREWORKS_API_KEY_2"],
+    "lambda":     ["LAMBDA_API_KEY_1", "LAMBDA_API_KEY_2"],
+    "runpod":     ["RUNPOD_API_KEY_1", "RUNPOD_API_KEY_2"],
 }
 
 

@@ -43,6 +43,15 @@ PROVIDERS = {
     "groq":   {"url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
     "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "model": "gemini-2.0-flash"},
     "openrouter": {"url": "https://openrouter.ai/api/v1/chat/completions", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    # OpenAI-compatible inference providers — wired but inactive until a key
+    # is added to the vault (see secrets.env: <NAME>_API_KEY_1). All speak the
+    # standard /chat/completions shape, so the existing client handles them.
+    "deepinfra":  {"url": "https://api.deepinfra.com/v1/openai/chat/completions", "model": "meta-llama/Meta-Llama-3.1-70B-Instruct"},
+    "fireworks":  {"url": "https://api.fireworks.ai/inference/v1/chat/completions", "model": "accounts/fireworks/models/llama-v3p3-70b-instruct"},
+    "lambda":     {"url": "https://api.lambda.ai/v1/chat/completions", "model": "llama3.3-70b-instruct-fp8"},
+    # RunPod serverless is per-endpoint: replace <ENDPOINT_ID> with your vLLM
+    # endpoint id, then set the model to whatever that endpoint serves.
+    "runpod":     {"url": "https://api.runpod.ai/v2/<ENDPOINT_ID>/openai/v1/chat/completions", "model": "<your-deployed-model>"},
 }
 
 class CloudError(RuntimeError):
