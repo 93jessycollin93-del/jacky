@@ -261,7 +261,7 @@ class DailyWorkflow:
 
         print()
 
-    def sync_repos(self):
+    def run_repo_sync(self):
         """Run scripts/sync_repos.py and print a one-line summary.
 
         Network/git heavy, so this only runs when --sync-repos is passed
@@ -271,11 +271,19 @@ class DailyWorkflow:
         print("="*70)
         print("REPO MIRROR SYNC")
         print("="*70)
+        sync_script = JACKY_HOME / "scripts" / "sync_repos.py"
+        if not sync_script.exists():
+            print(f"  [ALERT] {sync_script} not found — skipping repo sync.\n")
+            return 1
         try:
-            import sync_repos
-            exit_code = sync_repos.main([])
+            import sync_repos as sync_repos_module
         except Exception as e:
-            print(f"  [ALERT] sync_repos failed to run: {e}\n")
+            print(f"  [ALERT] could not import sync_repos.py: {e}\n")
+            return 1
+        try:
+            exit_code = sync_repos_module.main([])
+        except Exception as e:
+            print(f"  [ALERT] sync_repos.py raised an error while running: {e}\n")
             return 1
 
         from repo_mirror import load_status
@@ -292,7 +300,7 @@ def main():
     wf = DailyWorkflow(verbose=verbose)
 
     if do_sync:
-        wf.sync_repos()
+        wf.run_repo_sync()
 
     # System check
     all_ok, assess = wf.check_system()

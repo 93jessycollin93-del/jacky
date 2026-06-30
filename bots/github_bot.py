@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Dict, Any, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# bots/ is not a package (no __init__.py / relative-import support), and
+# repo_mirror.py lives at the project root, so we add it to sys.path here
+# rather than restructuring the bot layout.
 from repo_mirror import get_local_repo_path, repo_status  # noqa: E402
 
 log = logging.getLogger("GitHubBot")

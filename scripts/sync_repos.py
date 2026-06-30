@@ -42,6 +42,7 @@ JACKY_HOME = Path(__file__).resolve().parent.parent
 REPOS_FILE = JACKY_HOME / "repos.json"
 DEFAULT_BASE_DIR = JACKY_HOME / "data" / "repo_mirror"
 STATUS_FILE = JACKY_HOME / "data" / "repo_mirror_status.json"
+MAX_ERROR_LENGTH = 500  # keep only the last N chars of git error output (most relevant part)
 
 # Reuse the project's own secret loading rules for private-repo auth.
 sys.path.insert(0, str(JACKY_HOME))
@@ -123,11 +124,17 @@ def sync_one(repo: Dict[str, Any], owner: str, base_dir: Path, token: Optional[s
             entry["status"] = "ok"
         else:
             entry["status"] = "error"
-            entry["error"] = (result.stderr or result.stdout or "unknown git error").strip()[-500:]
+            entry["error"] = (result.stderr or result.stdout or "unknown git error").strip()[-MAX_ERROR_LENGTH:]
     except subprocess.TimeoutExpired:
         entry["status"] = "error"
         entry["error"] = "git operation timed out"
-    except Exception as e:  # noqa: BLE001 - we want to record any failure
+    except FileNotFoundError:
+        entry["status"] = "error"
+        entry["error"] = "git executable not found on PATH"
+    except PermissionError as e:
+        entry["status"] = "error"
+        entry["error"] = f"permission denied: {e}"
+    except Exception as e:  # noqa: BLE001 - last resort, still record the failure
         entry["status"] = "error"
         entry["error"] = str(e)
 
