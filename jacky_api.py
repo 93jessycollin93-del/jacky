@@ -38,7 +38,9 @@ for p in (str(JACKY_HOME), TOOLS_DIR):
         sys.path.insert(0, p)
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
+# Restrict CORS to trusted origins only
+TRUSTED_ORIGINS = os.getenv("SAS_TRUSTED_ORIGINS", "http://localhost:5000,http://127.0.0.1:5000").split(",")
+CORS(app, supports_credentials=True, origins=TRUSTED_ORIGINS)
 
 # ----------------------------------------------------------------------------
 # AUTH — protects SAS when it's exposed to the internet (Cloudflare Tunnel).
@@ -55,11 +57,27 @@ except Exception:
 SAS_ACCESS_TOKEN = get_secret("SAS_ACCESS_TOKEN") or ""
 REQUIRE_AUTH = bool(SAS_ACCESS_TOKEN.strip())
 
+# Fail fast if exposed to internet without auth
+SAS_HOST = os.getenv("SAS_HOST", "127.0.0.1")
+if not REQUIRE_AUTH and SAS_HOST not in ("127.0.0.1", "localhost", "::1"):
+    log.critical("FATAL: SAS_ACCESS_TOKEN is missing, but app is bound to a public interface "
+                 f"({SAS_HOST}). Refusing to start in open mode on public network. "
+                 "Set SAS_ACCESS_TOKEN in secrets/secrets.env or bind to 127.0.0.1.")
+    sys.exit(1)
+
 # Stable secret key so sessions survive restarts; falls back to random.
 app.secret_key = (get_secret("SAS_SECRET_KEY")
                   or os.getenv("SAS_SECRET_KEY")
                   or _secrets.token_hex(32))
-app.permanent_session_lifetime = timedelta(days=30)
+
+# Secure session cookies
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=24) # Reduced from 30 days
+)
+app.permanent_session_lifetime = timedelta(hours=24)
 
 # Paths reachable WITHOUT a session (login flow, health, PWA shell assets).
 _OPEN_PATHS = {
@@ -282,18 +300,45 @@ placeholder="paste your token" inputmode=text>
 </form></body></html>"""
 
 
+import time as _time
+
+# Basic rate limiting for login
+_login_attempts = {}
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """Token login. GET shows the form; POST validates and starts a session."""
     if not REQUIRE_AUTH:
         return redirect("/dashboard")
+        
+    client_ip = request.remote_addr
+    now = _time.time()
+    
+    # Clean up old attempts
+    for ip in list(_login_attempts.keys()):
+        if now - _login_attempts[ip]['time'] > 300: # 5 min
+            del _login_attempts[ip]
+            
+    if client_ip in _login_attempts and _login_attempts[client_ip]['count'] >= 5:
+        if now - _login_attempts[client_ip]['time'] < 60: # 1 min lockout
+            return "Too many attempts, try again later.", 429
+            
     error = False
     if request.method == 'POST':
         supplied = (request.form.get("token") or "").strip()
         if hmac.compare_digest(supplied, SAS_ACCESS_TOKEN):
             session.permanent = True
             session["authed"] = True
+            if client_ip in _login_attempts:
+                del _login_attempts[client_ip]
             return redirect("/dashboard")
+        
+        # Track failed attempt
+        if client_ip not in _login_attempts:
+            _login_attempts[client_ip] = {'count': 0, 'time': now}
+        _login_attempts[client_ip]['count'] += 1
+        _login_attempts[client_ip]['time'] = now
+        
         error = True
     return render_template_string(_LOGIN_HTML, error=error), (401 if error else 200)
 
@@ -1152,13 +1197,11 @@ import subprocess, re as _re, shlex as _shlex
 _SHELL_WHITELIST = [
     r"^Get-",
     r"^ls\b", r"^dir\b", r"^cat\b",
-    r"^python\b", r"^pip\b",
     r"^ollama\b",
     r"^git (status|log|diff|branch|show)\b",
     r"^nvidia-smi\b",
     r"^netstat\b", r"^ipconfig\b",
     r"^tasklist\b", r"^Get-Process\b",
-    r"^curl\b",
     r"^echo\b", r"^Write-Host\b",
     r"^Select-Object\b", r"^Where-Object\b", r"^Sort-Object\b",
     r"^Get-Content\b", r"^Test-Path\b", r"^Resolve-Path\b",
