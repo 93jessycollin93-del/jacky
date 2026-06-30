@@ -284,7 +284,11 @@
     </div>
 
     <script>
-        const API_URL = '/api';
+        const API_URL = new URL('/api', window.location.origin).toString().replace(/\/$/, '');
+        const MAX_TEMP_HISTORY_SAMPLES = 48;
+        const REFRESH_INTERVAL_MS = 5000;
+        const MAX_ONLINE_MODELS_DISPLAY = 10;
+        const MAX_DOWNLOADING_MODELS_DISPLAY = 6;
         const tempHistory = [];
 
         function handle401(resp) {
@@ -362,7 +366,7 @@
                 const vramPct = gpu.mem_total_mb ? (gpu.mem_used_mb / gpu.mem_total_mb) * 100 : 0;
                 setGauge('vram', vramPct, `${Math.round(vramPct)}%`, 90, 75);
                 tempHistory.push(temp);
-                if (tempHistory.length > 48) tempHistory.shift();
+                if (tempHistory.length > MAX_TEMP_HISTORY_SAMPLES) tempHistory.shift();
                 renderTimeline(maxTemp);
                 document.getElementById('local-state').textContent = gpu.safe_to_use ? 'safe to run' : 'thermal stop';
             } else {
@@ -426,8 +430,8 @@
             const downloading = data.downloading || [];
             document.getElementById('model-count').textContent = `${online.length} online`;
             const rows = [];
-            online.slice(0, 10).forEach(m => rows.push(renderOnlineModel(m)));
-            downloading.slice(0, 6).forEach(m => rows.push(renderDownloadingModel(m)));
+            online.slice(0, MAX_ONLINE_MODELS_DISPLAY).forEach(m => rows.push(renderOnlineModel(m)));
+            downloading.slice(0, MAX_DOWNLOADING_MODELS_DISPLAY).forEach(m => rows.push(renderDownloadingModel(m)));
             document.getElementById('models-list').innerHTML = rows.length ? rows.join('') : '<div class="row"><span>No local models reported</span></div>';
         }
 
@@ -445,7 +449,7 @@
         }
 
         refresh();
-        setInterval(refresh, 5000);
+        setInterval(refresh, REFRESH_INTERVAL_MS);
     </script>
 </body>
 </html>
