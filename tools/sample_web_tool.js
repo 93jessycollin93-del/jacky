@@ -4,7 +4,7 @@ const https = require('https');
 
 const url = process.argv[2];
 if (!url || !url.startsWith('https://')) {
-  console.error('Usage: sample_web_tool.js https://example.com/data.json');
+  console.error('Usage: node tools/sample_web_tool.js https://example.com/data.json');
   process.exit(2);
 }
 

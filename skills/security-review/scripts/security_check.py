@@ -6,7 +6,13 @@ import re
 import sys
 from pathlib import Path
 
-PATTERNS = [re.compile(r"(?i)(api[_-]?key|token|secret)\s*=\s*['\"][^'\"]{12,}['\"]")]
+# Demonstration-only patterns for common committed-secret mistakes. Production
+# environments should still use a dedicated scanner such as GitHub secret scanning.
+PATTERNS = [
+    re.compile(r"(?i)(api[_-]?key|token|secret)\s*=\s*['\"][^'\"]{12,}['\"]"),
+    re.compile(r"(?i)(api[_-]?key|token|secret)\s*[:=]\s*[A-Za-z0-9_\-]{20,}"),
+    re.compile(r"(?i)['\"](api[_-]?key|token|secret)['\"]\s*:\s*['\"][^'\"]{12,}['\"]"),
+]
 
 
 def scan(path: Path) -> list[str]:
