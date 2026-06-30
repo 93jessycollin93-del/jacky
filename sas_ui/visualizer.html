@@ -308,16 +308,18 @@
             return 'good';
         }
 
+        function gaugeGradient(value, dangerAt, warnAt) {
+            if (value >= dangerAt) return 'linear-gradient(90deg,#ff6b6b,#ff2f2f)';
+            if (value >= warnAt) return 'linear-gradient(90deg,#ffa500,#ffd166)';
+            return 'linear-gradient(90deg,#00dc82,#00d4ff)';
+        }
+
         function setGauge(prefix, value, label, dangerAt = 90, warnAt = 70) {
             const fill = document.getElementById(`${prefix}-fill`);
             const val = document.getElementById(`${prefix}-val`);
             const p = pct(value);
             fill.style.width = `${p}%`;
-            fill.style.background = p >= dangerAt
-                ? 'linear-gradient(90deg,#ff6b6b,#ff2f2f)'
-                : p >= warnAt
-                    ? 'linear-gradient(90deg,#ffa500,#ffd166)'
-                    : 'linear-gradient(90deg,#00dc82,#00d4ff)';
+            fill.style.background = gaugeGradient(p, dangerAt, warnAt);
             val.textContent = label || `${Math.round(p)}%`;
         }
 
@@ -355,7 +357,8 @@
                 const tempPct = maxTemp ? (temp / maxTemp) * 100 : 0;
                 const cls = tempClass(temp, maxTemp, gpu.thermal_margin || 5);
                 document.getElementById('gpu-val').innerHTML = `<span class="${cls}">${temp.toFixed(0)}°C</span>`;
-                setGauge('gpu', tempPct, `${temp.toFixed(0)}°C`, 100, 90);
+                const warnPct = ((maxTemp - (gpu.thermal_margin || 5)) / maxTemp) * 100;
+                setGauge('gpu', tempPct, `${temp.toFixed(0)}°C`, 100, warnPct);
                 const vramPct = gpu.mem_total_mb ? (gpu.mem_used_mb / gpu.mem_total_mb) * 100 : 0;
                 setGauge('vram', vramPct, `${Math.round(vramPct)}%`, 90, 75);
                 tempHistory.push(temp);
@@ -379,10 +382,17 @@
             const badge = data.badge || 'Unknown';
             const word = document.getElementById('status-word');
             word.textContent = badge.toUpperCase();
-            word.className = 'status-word ' + (badge === 'Escalate' ? 'hot' : badge === 'Warm' ? 'warm' : badge === 'Safe' ? 'good' : '');
+            const badgeClasses = { Escalate: 'hot', Warm: 'warm', Safe: 'good' };
+            word.className = 'status-word ' + (badgeClasses[badge] || '');
             document.getElementById('status-reason').textContent = data.reason || 'No reason reported yet.';
             document.getElementById('routing-reason').textContent = data.reason || 'No routing reason reported.';
             document.getElementById('routing-level').textContent = data.level || 'unknown';
+        }
+
+        function renderBotRow(bot) {
+            const name = escapeHtml(bot.name || bot.key || 'bot');
+            const status = escapeHtml(bot.status || 'idle');
+            return `<div class="row"><span>${name}</span><strong class="good">${status}</strong></div>`;
         }
 
         async function loadBots() {
@@ -393,8 +403,18 @@
             const bots = data.bots || [];
             document.getElementById('bot-count').textContent = `${bots.length} available`;
             document.getElementById('bots-list').innerHTML = bots.length
-                ? bots.map(bot => `<div class="row"><span>${escapeHtml(bot.name || bot.key || 'bot')}</span><strong class="good">${escapeHtml(bot.status || 'idle')}</strong></div>`).join('')
+                ? bots.map(renderBotRow).join('')
                 : '<div class="row"><span>No bots reported</span></div>';
+        }
+
+        function renderOnlineModel(model) {
+            const name = escapeHtml(model.name);
+            const specialty = escapeHtml(model.specialty || 'online');
+            return `<div class="row"><span>${name}</span><strong class="good">${specialty}</strong></div>`;
+        }
+
+        function renderDownloadingModel(modelName) {
+            return `<div class="row"><span>${escapeHtml(modelName)}</span><strong class="warm">downloading</strong></div>`;
         }
 
         async function loadModels() {
@@ -406,8 +426,8 @@
             const downloading = data.downloading || [];
             document.getElementById('model-count').textContent = `${online.length} online`;
             const rows = [];
-            online.slice(0, 10).forEach(m => rows.push(`<div class="row"><span>${escapeHtml(m.name)}</span><strong class="good">${escapeHtml(m.specialty || 'online')}</strong></div>`));
-            downloading.slice(0, 6).forEach(m => rows.push(`<div class="row"><span>${escapeHtml(m)}</span><strong class="warm">downloading</strong></div>`));
+            online.slice(0, 10).forEach(m => rows.push(renderOnlineModel(m)));
+            downloading.slice(0, 6).forEach(m => rows.push(renderDownloadingModel(m)));
             document.getElementById('models-list').innerHTML = rows.length ? rows.join('') : '<div class="row"><span>No local models reported</span></div>';
         }
 
