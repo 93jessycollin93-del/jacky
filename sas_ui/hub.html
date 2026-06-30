@@ -444,7 +444,7 @@ async function loadSquads() {
 }
 
 function esc(s) {
-  if (s == null) return '';
+  if (s === null || s === undefined) return '';
   const d = document.createElement('div');
   d.textContent = String(s);
   return d.innerHTML;
@@ -466,7 +466,7 @@ function renderSquads(squads) {
         </div>
         <div class="squad-bots">`;
     for (const bot of (info.bots || [])) {
-      const initials = esc(String(bot.name || '').slice(0,2).toUpperCase());
+      const initials = esc(String(bot.name ?? '').slice(0,2).toUpperCase());
       const isActive = bot.id === activeBot ? 'active' : '';
       html += `
           <div class="bot-item ${isActive}" id="bot-${esc(bot.id)}" onclick="selectBot('${esc(squad)}','${esc(bot.id)}')">
@@ -597,7 +597,7 @@ async function pollModels() {
     }
     list.innerHTML = models.slice(0, 6).map(m => `
       <div class="model-chip">
-        <span>${esc(String(m.name || '').split(':')[0])}</span>
+        <span>${esc(String(m.name ?? '').split(':')[0])}</span>
         <span class="model-state">●</span>
       </div>`).join('');
   } catch(e) {}
