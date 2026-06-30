@@ -46,5 +46,13 @@
   "runtime_controls": {
     "active": true,
     "thinking_mode": "fast"
+  },
+  "rag": {
+    "enabled": true,
+    "db_path": "data/jacky_knowledge.db",
+    "model": "all-minilm-l6-v2",
+    "chunk_size": 512,
+    "top_k": 5,
+    "max_context_chars": 2000
   }
 }
