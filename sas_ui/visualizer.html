@@ -286,7 +286,9 @@
     <script>
         const API_URL = new URL('/api', window.location.origin).toString();
         const DEFAULT_MAX_GPU_TEMP_C = 75;
-        const TIMELINE_WIDTH = 600;
+        const DEFAULT_TIMELINE_WIDTH = 600;
+        const TIMELINE_TOP = 15;
+        const TIMELINE_BOTTOM = 105;
         const MAX_TEMP_HISTORY_SAMPLES = 48;
         const REFRESH_INTERVAL_MS = 5000;
         const MAX_ONLINE_MODELS_DISPLAY = 10;
@@ -308,10 +310,24 @@
         }
 
         function tempClass(value, max, margin) {
-            if (!Number.isFinite(value)) return '';
-            if (value >= max) return 'hot';
-            if (value >= max - margin) return 'warm';
+            const n = Number(value);
+            const limit = Number(max);
+            const buffer = Number(margin);
+            if (!Number.isFinite(n) || !Number.isFinite(limit) || !Number.isFinite(buffer)) return '';
+            if (n >= limit) return 'hot';
+            if (n >= limit - buffer) return 'warm';
             return 'good';
+        }
+
+        function timelineWidth(svg) {
+            return svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width
+                ? svg.viewBox.baseVal.width
+                : DEFAULT_TIMELINE_WIDTH;
+        }
+
+        function timelineX(index, total, width) {
+            if (total <= 1) return width / 2;
+            return (index / (total - 1)) * width;
         }
 
         function gaugeGradient(value, dangerAt, warnAt) {
@@ -331,19 +347,20 @@
 
         function renderTimeline(maxTemp) {
             const svg = document.getElementById('timeline');
+            const width = timelineWidth(svg);
             const limit = Number.isFinite(Number(maxTemp)) && Number(maxTemp) > 0 ? Number(maxTemp) : DEFAULT_MAX_GPU_TEMP_C;
             if (!tempHistory.length) {
                 svg.innerHTML = '<text x="24" y="68" fill="#789" font-size="13">Waiting for GPU temperature samples…</text>';
                 return;
             }
             const points = tempHistory.map((v, i) => {
-                const x = tempHistory.length === 1 ? TIMELINE_WIDTH / 2 : (i / (tempHistory.length - 1)) * TIMELINE_WIDTH;
-                const y = 105 - (Math.max(0, Math.min(limit, v)) / limit) * 90;
+                const x = timelineX(i, tempHistory.length, width);
+                const y = TIMELINE_BOTTOM - (Math.max(0, Math.min(limit, v)) / limit) * (TIMELINE_BOTTOM - TIMELINE_TOP);
                 return `${x.toFixed(1)},${y.toFixed(1)}`;
             }).join(' ');
-            const thresholdY = 105 - (limit / limit) * 90;
+            const thresholdY = TIMELINE_TOP;
             svg.innerHTML = `
-                <line x1="0" y1="${thresholdY}" x2="${TIMELINE_WIDTH}" y2="${thresholdY}" stroke="rgba(255,107,107,.45)" stroke-dasharray="8 8"></line>
+                <line x1="0" y1="${thresholdY}" x2="${width}" y2="${thresholdY}" stroke="rgba(255,107,107,.45)" stroke-dasharray="8 8"></line>
                 <polyline points="${points}" fill="none" stroke="#00d4ff" stroke-width="3"></polyline>
                 <text x="16" y="22" fill="#8aa" font-size="12">GPU temp history</text>
             `;
@@ -360,6 +377,12 @@
             if (gpu.available) {
                 const maxTemp = gpu.max_temp_c || DEFAULT_MAX_GPU_TEMP_C;
                 const temp = Number(gpu.temp_c);
+                if (!Number.isFinite(temp)) {
+                    document.getElementById('gpu-val').textContent = 'n/a';
+                    document.getElementById('local-state').textContent = 'temp unavailable';
+                    renderTimeline(maxTemp);
+                    return;
+                }
                 const tempPct = maxTemp ? (temp / maxTemp) * 100 : 0;
                 const cls = tempClass(temp, maxTemp, gpu.thermal_margin || 5);
                 const gpuValue = document.getElementById('gpu-val');
@@ -367,7 +390,9 @@
                 gpuValue.className = cls;
                 const warnPct = ((maxTemp - (gpu.thermal_margin || 5)) / maxTemp) * 100;
                 setGauge('gpu', tempPct, `${temp.toFixed(0)}°C`, 100, warnPct);
-                const vramPct = gpu.mem_total_mb ? (gpu.mem_used_mb / gpu.mem_total_mb) * 100 : 0;
+                const memUsedMb = Number.isFinite(Number(gpu.mem_used_mb)) ? Number(gpu.mem_used_mb) : 0;
+                const memTotalMb = Number.isFinite(Number(gpu.mem_total_mb)) ? Number(gpu.mem_total_mb) : 0;
+                const vramPct = memTotalMb > 0 ? (memUsedMb / memTotalMb) * 100 : 0;
                 setGauge('vram', vramPct, `${Math.round(vramPct)}%`, 90, 75);
                 tempHistory.push(temp);
                 if (tempHistory.length > MAX_TEMP_HISTORY_SAMPLES) tempHistory.shift();
