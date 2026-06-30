@@ -253,6 +253,15 @@ def chat_page():
     return jsonify({"error": "Chat UI not found"}), 404
 
 
+@app.route('/visualizer', methods=['GET'])
+def visualizer_page():
+    """Serve the live Jacky visualization UI."""
+    visualizer_file = SAS_UI_PATH / "visualizer.html"
+    if visualizer_file.exists():
+        return send_file(str(visualizer_file))
+    return jsonify({"error": "Visualizer UI not found"}), 404
+
+
 @app.route('/health', methods=['GET'])
 def health():
     """Health check (always open — used by the tunnel + uptime checks)."""

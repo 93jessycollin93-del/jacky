@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Jacky Visualizer</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0a0e27">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
+            background: radial-gradient(circle at top, #15365f 0%, #0a0e27 45%, #050814 100%);
+            color: #eaf6ff;
+            overflow-x: hidden;
+        }
+        .shell { max-width: 1280px; margin: 0 auto; padding: 22px; }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 22px;
+            padding: 18px 20px;
+            background: rgba(0, 50, 100, 0.28);
+            border: 1px solid rgba(0, 212, 255, 0.24);
+            border-left: 4px solid #00d4ff;
+            border-radius: 12px;
+            backdrop-filter: blur(12px);
+        }
+        h1 { font-size: 26px; display: flex; align-items: center; gap: 10px; }
+        .nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .pill {
+            color: #06223a;
+            background: linear-gradient(90deg, #00d4ff, #0099ff);
+            border-radius: 999px;
+            padding: 7px 14px;
+            font-size: 12px;
+            font-weight: 800;
+            text-decoration: none;
+        }
+        .muted { color: #8aa9bd; font-size: 12px; }
+        .grid {
+            display: grid;
+            grid-template-columns: minmax(320px, 1fr) minmax(320px, 0.8fr);
+            gap: 20px;
+        }
+        .card {
+            background: rgba(0, 35, 72, 0.38);
+            border: 1px solid rgba(0, 212, 255, 0.18);
+            border-radius: 16px;
+            padding: 18px;
+            box-shadow: 0 18px 60px rgba(0, 0, 0, 0.24);
+            backdrop-filter: blur(12px);
+        }
+        .card h2 {
+            color: #00d4ff;
+            font-size: 15px;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            letter-spacing: .2px;
+        }
+        .stage {
+            min-height: 560px;
+            position: relative;
+            overflow: hidden;
+        }
+        .orb-wrap {
+            position: absolute;
+            inset: 40px 30px 85px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .orb {
+            width: min(46vw, 460px);
+            height: min(46vw, 460px);
+            min-width: 290px;
+            min-height: 290px;
+            border-radius: 50%;
+            position: relative;
+            background:
+                radial-gradient(circle at 35% 30%, rgba(255,255,255,.22), transparent 14%),
+                radial-gradient(circle at 50% 50%, rgba(0,212,255,.45), rgba(0,80,160,.20) 42%, rgba(0,0,0,.06) 58%, transparent 72%);
+            border: 1px solid rgba(0, 212, 255, 0.32);
+            box-shadow:
+                0 0 48px rgba(0, 212, 255, 0.28),
+                inset 0 0 80px rgba(0, 212, 255, 0.18);
+            animation: breathe 4s ease-in-out infinite;
+        }
+        .orb::before,
+        .orb::after {
+            content: "";
+            position: absolute;
+            inset: -8%;
+            border-radius: 50%;
+            border: 1px solid rgba(0, 212, 255, .18);
+            animation: spin 22s linear infinite;
+        }
+        .orb::after {
+            inset: 8%;
+            border-color: rgba(255, 165, 0, .18);
+            animation-duration: 15s;
+            animation-direction: reverse;
+        }
+        .core-label {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            gap: 8px;
+            pointer-events: none;
+        }
+        .status-word { font-size: 34px; font-weight: 900; letter-spacing: .8px; }
+        .status-reason { max-width: 300px; color: #b7d6e9; font-size: 12px; line-height: 1.4; }
+        .node {
+            position: absolute;
+            width: 110px;
+            min-height: 72px;
+            padding: 10px;
+            border: 1px solid rgba(0, 212, 255, .28);
+            border-radius: 14px;
+            background: rgba(0, 0, 0, .28);
+            text-align: center;
+            font-size: 12px;
+            box-shadow: 0 0 18px rgba(0, 212, 255, .08);
+        }
+        .node strong { display: block; color: #00d4ff; font-size: 13px; margin-bottom: 4px; }
+        .node span { color: #b4c7d4; font-size: 11px; }
+        .node.local { left: 6%; top: 14%; }
+        .node.cloud { right: 6%; top: 14%; }
+        .node.bots { left: 7%; bottom: 9%; }
+        .node.models { right: 7%; bottom: 9%; }
+        .flow {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            opacity: .85;
+        }
+        .flow path {
+            fill: none;
+            stroke: rgba(0, 212, 255, .34);
+            stroke-width: 2;
+            stroke-dasharray: 8 10;
+            animation: dash 4s linear infinite;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+        .gauge {
+            padding: 14px;
+            border-radius: 12px;
+            background: rgba(0, 0, 0, .24);
+            border: 1px solid rgba(255, 255, 255, .08);
+        }
+        .gauge-top { display: flex; justify-content: space-between; font-size: 12px; color: #abc; margin-bottom: 8px; }
+        .bar { height: 10px; background: rgba(255,255,255,.08); border-radius: 99px; overflow: hidden; }
+        .fill { height: 100%; width: 0%; background: linear-gradient(90deg, #00dc82, #00d4ff); transition: width .4s ease, background .4s ease; }
+        .timeline {
+            height: 120px;
+            width: 100%;
+            margin-top: 10px;
+            background: rgba(0,0,0,.22);
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 12px;
+        }
+        .list { display: flex; flex-direction: column; gap: 8px; }
+        .row {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, .24);
+            border: 1px solid rgba(255,255,255,.06);
+            font-size: 12px;
+        }
+        .good { color: #00dc82; }
+        .warm { color: #ffa500; }
+        .hot { color: #ff6b6b; }
+        .wide { grid-column: 1 / -1; }
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); filter: hue-rotate(0deg); }
+            50% { transform: scale(1.025); filter: hue-rotate(12deg); }
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes dash { to { stroke-dashoffset: -72; } }
+        @media (max-width: 900px) {
+            .grid { grid-template-columns: 1fr; }
+            header { align-items: flex-start; flex-direction: column; }
+            .stage { min-height: 510px; }
+            .node { width: 96px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <header>
+            <div>
+                <h1><span>🧬</span> Jacky Visualizer</h1>
+                <div class="muted">Live view of Jacky's routing brain, thermal safety, models, and bot pool.</div>
+            </div>
+            <div class="nav">
+                <a class="pill" href="/dashboard">← Dashboard</a>
+                <a class="pill" href="/chat">Chat</a>
+                <span class="muted">Updated <span id="updated">loading…</span></span>
+            </div>
+        </header>
+
+        <div class="grid">
+            <section class="card stage">
+                <h2><span>🧠</span> Situation-Aware Routing Map</h2>
+                <svg class="flow" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true">
+                    <path d="M170,130 C330,180 360,270 500,300 C640,270 670,180 830,130"></path>
+                    <path d="M170,485 C330,420 360,335 500,300 C640,335 670,420 830,485"></path>
+                </svg>
+                <div class="node local"><strong>Local</strong><span id="local-state">checking…</span></div>
+                <div class="node cloud"><strong>Free Cloud</strong><span id="cloud-state">fallback tier</span></div>
+                <div class="node bots"><strong>Bots</strong><span id="bot-count">loading…</span></div>
+                <div class="node models"><strong>Models</strong><span id="model-count">loading…</span></div>
+                <div class="orb-wrap">
+                    <div class="orb">
+                        <div class="core-label">
+                            <div class="status-word" id="status-word">JACKY</div>
+                            <div class="status-reason" id="status-reason">Reading live situation…</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <aside class="card">
+                <h2><span>📡</span> Live Telemetry</h2>
+                <div class="metrics">
+                    <div class="gauge">
+                        <div class="gauge-top"><span>CPU</span><strong id="cpu-val">--</strong></div>
+                        <div class="bar"><div class="fill" id="cpu-fill"></div></div>
+                    </div>
+                    <div class="gauge">
+                        <div class="gauge-top"><span>RAM</span><strong id="ram-val">--</strong></div>
+                        <div class="bar"><div class="fill" id="ram-fill"></div></div>
+                    </div>
+                    <div class="gauge">
+                        <div class="gauge-top"><span>GPU Temp</span><strong id="gpu-val">--</strong></div>
+                        <div class="bar"><div class="fill" id="gpu-fill"></div></div>
+                    </div>
+                    <div class="gauge">
+                        <div class="gauge-top"><span>VRAM</span><strong id="vram-val">--</strong></div>
+                        <div class="bar"><div class="fill" id="vram-fill"></div></div>
+                    </div>
+                </div>
+                <svg class="timeline" id="timeline" viewBox="0 0 600 120" preserveAspectRatio="none" role="img" aria-label="GPU temperature history"></svg>
+            </aside>
+
+            <section class="card">
+                <h2><span>🤖</span> Bot Pool</h2>
+                <div class="list" id="bots-list"><div class="row"><span>Loading bots…</span></div></div>
+            </section>
+
+            <section class="card">
+                <h2><span>🧩</span> Local Model Roster</h2>
+                <div class="list" id="models-list"><div class="row"><span>Loading models…</span></div></div>
+            </section>
+
+            <section class="card wide">
+                <h2><span>🛣️</span> Current Routing Explanation</h2>
+                <div class="row">
+                    <span id="routing-reason">Waiting for assessment…</span>
+                    <strong id="routing-level">unknown</strong>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '/api';
+        const tempHistory = [];
+
+        function handle401(resp) {
+            if (resp && resp.status === 401) {
+                window.location.href = '/login';
+                return true;
+            }
+            return false;
+        }
+
+        function pct(value) {
+            const n = Number(value);
+            if (!Number.isFinite(n)) return 0;
+            return Math.max(0, Math.min(100, n));
+        }
+
+        function tempClass(value, max, margin) {
+            if (!Number.isFinite(value)) return '';
+            if (value >= max) return 'hot';
+            if (value >= max - margin) return 'warm';
+            return 'good';
+        }
+
+        function setGauge(prefix, value, label, dangerAt = 90, warnAt = 70) {
+            const fill = document.getElementById(`${prefix}-fill`);
+            const val = document.getElementById(`${prefix}-val`);
+            const p = pct(value);
+            fill.style.width = `${p}%`;
+            fill.style.background = p >= dangerAt
+                ? 'linear-gradient(90deg,#ff6b6b,#ff2f2f)'
+                : p >= warnAt
+                    ? 'linear-gradient(90deg,#ffa500,#ffd166)'
+                    : 'linear-gradient(90deg,#00dc82,#00d4ff)';
+            val.textContent = label || `${Math.round(p)}%`;
+        }
+
+        function renderTimeline(maxTemp) {
+            const svg = document.getElementById('timeline');
+            if (!tempHistory.length) {
+                svg.innerHTML = '<text x="24" y="68" fill="#789" font-size="13">Waiting for GPU temperature samples…</text>';
+                return;
+            }
+            const points = tempHistory.map((v, i) => {
+                const x = tempHistory.length === 1 ? 0 : (i / (tempHistory.length - 1)) * 600;
+                const y = 105 - (Math.max(0, Math.min(maxTemp || 100, v)) / (maxTemp || 100)) * 90;
+                return `${x.toFixed(1)},${y.toFixed(1)}`;
+            }).join(' ');
+            const thresholdY = 105 - ((maxTemp || 75) / (maxTemp || 100)) * 90;
+            svg.innerHTML = `
+                <line x1="0" y1="${thresholdY}" x2="600" y2="${thresholdY}" stroke="rgba(255,107,107,.45)" stroke-dasharray="8 8"></line>
+                <polyline points="${points}" fill="none" stroke="#00d4ff" stroke-width="3"></polyline>
+                <text x="16" y="22" fill="#8aa" font-size="12">GPU temp history</text>
+            `;
+        }
+
+        async function loadStatus() {
+            const response = await fetch(`${API_URL}/status`);
+            if (handle401(response)) return;
+            if (!response.ok) throw new Error('status unavailable');
+            const data = await response.json();
+            setGauge('cpu', data.cpu || 0);
+            setGauge('ram', data.memory || 0);
+            const gpu = data.gpu || {};
+            if (gpu.available) {
+                const maxTemp = gpu.max_temp_c || 75;
+                const temp = Number(gpu.temp_c);
+                const tempPct = maxTemp ? (temp / maxTemp) * 100 : 0;
+                const cls = tempClass(temp, maxTemp, gpu.thermal_margin || 5);
+                document.getElementById('gpu-val').innerHTML = `<span class="${cls}">${temp.toFixed(0)}°C</span>`;
+                setGauge('gpu', tempPct, `${temp.toFixed(0)}°C`, 100, 90);
+                const vramPct = gpu.mem_total_mb ? (gpu.mem_used_mb / gpu.mem_total_mb) * 100 : 0;
+                setGauge('vram', vramPct, `${Math.round(vramPct)}%`, 90, 75);
+                tempHistory.push(temp);
+                if (tempHistory.length > 48) tempHistory.shift();
+                renderTimeline(maxTemp);
+                document.getElementById('local-state').textContent = gpu.safe_to_use ? 'safe to run' : 'thermal stop';
+            } else {
+                document.getElementById('gpu-val').textContent = 'n/a';
+                document.getElementById('vram-val').textContent = 'n/a';
+                document.getElementById('local-state').textContent = 'no telemetry';
+                renderTimeline(75);
+            }
+            document.getElementById('updated').textContent = new Date().toLocaleTimeString();
+        }
+
+        async function loadAssessment() {
+            const response = await fetch(`${API_URL}/assessment`);
+            if (handle401(response)) return;
+            if (!response.ok) throw new Error('assessment unavailable');
+            const data = await response.json();
+            const badge = data.badge || 'Unknown';
+            const word = document.getElementById('status-word');
+            word.textContent = badge.toUpperCase();
+            word.className = 'status-word ' + (badge === 'Escalate' ? 'hot' : badge === 'Warm' ? 'warm' : badge === 'Safe' ? 'good' : '');
+            document.getElementById('status-reason').textContent = data.reason || 'No reason reported yet.';
+            document.getElementById('routing-reason').textContent = data.reason || 'No routing reason reported.';
+            document.getElementById('routing-level').textContent = data.level || 'unknown';
+        }
+
+        async function loadBots() {
+            const response = await fetch(`${API_URL}/bots`);
+            if (!response.ok) throw new Error('bots unavailable');
+            const data = await response.json();
+            const bots = data.bots || [];
+            document.getElementById('bot-count').textContent = `${bots.length} available`;
+            document.getElementById('bots-list').innerHTML = bots.length
+                ? bots.map(bot => `<div class="row"><span>${escapeHtml(bot.name || bot.key || 'bot')}</span><strong class="good">${escapeHtml(bot.status || 'idle')}</strong></div>`).join('')
+                : '<div class="row"><span>No bots reported</span></div>';
+        }
+
+        async function loadModels() {
+            const response = await fetch(`${API_URL}/models`);
+            if (!response.ok) throw new Error('models unavailable');
+            const data = await response.json();
+            const online = data.online || [];
+            const downloading = data.downloading || [];
+            document.getElementById('model-count').textContent = `${online.length} online`;
+            const rows = [];
+            online.slice(0, 10).forEach(m => rows.push(`<div class="row"><span>${escapeHtml(m.name)}</span><strong class="good">${escapeHtml(m.specialty || 'online')}</strong></div>`));
+            downloading.slice(0, 6).forEach(m => rows.push(`<div class="row"><span>${escapeHtml(m)}</span><strong class="warm">downloading</strong></div>`));
+            document.getElementById('models-list').innerHTML = rows.length ? rows.join('') : '<div class="row"><span>No local models reported</span></div>';
+        }
+
+        function escapeHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        async function refresh() {
+            await Promise.allSettled([loadStatus(), loadAssessment(), loadBots(), loadModels()]);
+        }
+
+        refresh();
+        setInterval(refresh, 5000);
+    </script>
+</body>
+</html>
