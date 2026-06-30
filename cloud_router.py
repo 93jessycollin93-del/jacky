@@ -27,6 +27,22 @@ log = logging.getLogger("CloudRouter")
 
 JACKY_HOME = Path(__file__).parent
 
+
+def count_tokens(text: str) -> int:
+    """Estimate token count. Uses tiktoken if available (accurate for the
+    OpenAI-compatible providers this router talks to); otherwise falls back to
+    the standard ~4-chars-per-token heuristic. Never raises."""
+    if not text:
+        return 0
+    try:
+        import tiktoken
+        # cl100k_base is a reasonable cross-provider approximation; we only
+        # need it good enough to drive the 80% rotation threshold, not billing.
+        enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
+    except Exception:
+        return len(text) // 4 + 1
+
 # Which key names feed each provider (resolved lazily via secrets_loader,
 # which reads the gitignored vault — never slurps real secrets at boot).
 PROVIDER_KEYS = {
@@ -216,8 +232,8 @@ class CloudRouter:
                 result = client.timed_generate(prompt, system=system, max_tokens=max_tokens)
                 result["tried"] = tried
                 if result.get("status") == "ok":
-                    # Record successful usage
-                    token_estimate = len(prompt.split()) + len(result.get("response", "").split())
+                    # Record successful usage (real tokenization when available)
+                    token_estimate = count_tokens(prompt) + count_tokens(result.get("response", ""))
                     self.tracker.record(self.current_provider, token_estimate, success=True)
                     return result
                 tried.append({"provider": self.current_provider, "error": result.get("response")})

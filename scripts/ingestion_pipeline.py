@@ -124,56 +124,49 @@ def load_parquet_file(path: Path) -> str:
 
 # ─── Ingestion for different sources ───────────────────────────────────
 
+def _safe_source(path: Path) -> str:
+    """Relative path for metadata; fall back to absolute if not under cwd."""
+    try:
+        return str(path.relative_to(Path.cwd()))
+    except ValueError:
+        return str(path)
+
+def _make_chunk(path: Path, text: str, source_type: str, file_type: str) -> Chunk:
+    """Build a Chunk with a stable, content-derived id."""
+    return Chunk(
+        chunk_id=f"{path.stem}_{hashlib.md5(text.encode()).hexdigest()[:8]}",
+        source_file=_safe_source(path),
+        source_type=source_type,
+        text=text,
+        metadata={"file_type": file_type, "path": str(path)},
+    )
+
 def ingest_file(path: Path, file_type: str = None) -> List[Chunk]:
     """Load a file, chunk it, return Chunk objects."""
     chunks_out = []
     if file_type is None:
         file_type = path.suffix.lower().lstrip('.')
 
-    # Map file extension to loader
+    # Collect raw text blocks, then chunk uniformly.
     if file_type in ('json', 'jsonl'):
-        for record in load_json_file(path):
-            text = json.dumps(record) if isinstance(record, dict) else str(record)
-            for chunk_text in chunk_text(text):
-                chunks_out.append(Chunk(
-                    chunk_id=f"{path.stem}_{hashlib.md5(chunk_text.encode()).hexdigest()[:8]}",
-                    source_file=str(path.relative_to(Path.cwd())),
-                    source_type='json',
-                    text=chunk_text,
-                    metadata={"file_type": file_type, "path": str(path)}
-                ))
-    elif file_type in ('csv',):
-        text = load_csv_file(path)
-        for chunk_text in chunk_text(text):
-            chunks_out.append(Chunk(
-                chunk_id=f"{path.stem}_{hashlib.md5(chunk_text.encode()).hexdigest()[:8]}",
-                source_file=str(path.relative_to(Path.cwd())),
-                source_type='csv',
-                text=chunk_text,
-                metadata={"file_type": file_type, "path": str(path)}
-            ))
-    elif file_type in ('parquet',):
-        text = load_parquet_file(path)
-        if text:
-            for chunk_text in chunk_text(text):
-                chunks_out.append(Chunk(
-                    chunk_id=f"{path.stem}_{hashlib.md5(chunk_text.encode()).hexdigest()[:8]}",
-                    source_file=str(path.relative_to(Path.cwd())),
-                    source_type='parquet',
-                    text=chunk_text,
-                    metadata={"file_type": file_type, "path": str(path)}
-                ))
+        source_type = 'json'
+        blocks = (json.dumps(rec) if isinstance(rec, dict) else str(rec)
+                  for rec in load_json_file(path))
+    elif file_type == 'csv':
+        source_type = 'csv'
+        blocks = [load_csv_file(path)]
+    elif file_type == 'parquet':
+        source_type = 'parquet'
+        blocks = [load_parquet_file(path)]
     else:  # markdown, code, text
-        text = load_text_file(path)
-        if text:
-            for chunk_text in chunk_text(text):
-                chunks_out.append(Chunk(
-                    chunk_id=f"{path.stem}_{hashlib.md5(chunk_text.encode()).hexdigest()[:8]}",
-                    source_file=str(path.relative_to(Path.cwd())),
-                    source_type=file_type,
-                    text=chunk_text,
-                    metadata={"file_type": file_type, "path": str(path)}
-                ))
+        source_type = file_type
+        blocks = [load_text_file(path)]
+
+    for block in blocks:
+        if not block:
+            continue
+        for piece in chunk_text(block):
+            chunks_out.append(_make_chunk(path, piece, source_type, file_type))
 
     log.info(f"Ingested {path.name}: {len(chunks_out)} chunks")
     return chunks_out
