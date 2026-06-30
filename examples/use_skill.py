@@ -21,7 +21,7 @@ def load_skill(skill_name: str) -> dict:
     if len(parts) < 3:
         return {"name": skill_name, "body": text}
 
-    import yaml  # stdlib pyyaml
+    import yaml  # pyyaml (third-party, listed in requirements.txt)
 
     frontmatter = yaml.safe_load(parts[1])
     frontmatter["body"] = parts[2].strip()

@@ -1,8 +1,8 @@
 # Agent Definition Template
 
-Copy this file to `.github/agents/my-agent.agent.md` and fill in the blanks.
+Copy the content below to `.github/agents/my-agent.agent.md` and fill in the blanks.
 
-```markdown
+```
 ---
 name: MyAgent
 description: One sentence describing what this agent does.

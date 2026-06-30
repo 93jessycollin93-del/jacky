@@ -24,7 +24,7 @@ reasoning patterns accessible from Copilot Chat and CI/CD workflows.
 
 OmniAgent layers on top of Jacky's existing routing engine to provide:
 
-- **5 specialized sub-agents** (Coder, Researcher, Tester, DevOps, Reviewer)
+- **1 master orchestrator** (OmniAgent) + **5 specialized sub-agents** (Coder, Researcher, Tester, DevOps, Reviewer)
 - **4 reusable skills** (Web Research, Code Refactor, Write Tests, Debug Issue)
 - **Prompt library** with ReAct, Plan-and-Execute, and CoT templates
 - **CI workflow** that validates all agent definition files on every PR

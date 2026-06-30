@@ -1,8 +1,8 @@
 # Skill Definition Template
 
-Copy this file to `skills/my-skill.skill.md` and fill in the blanks.
+Copy the content below to `skills/my-skill.skill.md` and fill in the blanks.
 
-```markdown
+```
 ---
 skill: my-skill
 description: One-line description of what this skill does.
