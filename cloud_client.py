@@ -39,7 +39,7 @@ except Exception as _e:  # pragma: no cover - fallback to standard verification
 
 # Provider presets: base_url + a sensible default model.
 PROVIDERS = {
-    "xai":    {"url": "https://api.x.ai/v1/chat/completions",            "model": "grok-beta"},
+    "xai":    {"url": "https://api.x.ai/v1/chat/completions",            "model": "grok-4"},
     "groq":   {"url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
     "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "model": "gemini-2.0-flash"},
     "openrouter": {"url": "https://openrouter.ai/api/v1/chat/completions", "model": "meta-llama/llama-3.3-70b-instruct:free"},

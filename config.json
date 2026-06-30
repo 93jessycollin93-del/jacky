@@ -7,7 +7,9 @@
     "cloud_bots": {
       "enabled": true,
       "providers": [
-        "groq"
+        "groq",
+        "gemini",
+        "xai"
       ]
     }
   },
@@ -20,6 +22,24 @@
     },
     "openrouter": {
       "enabled": false
+    }
+  },
+  "provider_limits": {
+    "xai": {
+      "max_tokens_per_minute": 60000,
+      "max_requests_per_minute": 100
+    },
+    "groq": {
+      "max_tokens_per_minute": 6000,
+      "max_requests_per_minute": 30
+    },
+    "gemini": {
+      "max_tokens_per_minute": 15000,
+      "max_requests_per_minute": 60
+    },
+    "openrouter": {
+      "max_tokens_per_minute": 100000,
+      "max_requests_per_minute": 200
     }
   },
   "power_mode": "performance",
