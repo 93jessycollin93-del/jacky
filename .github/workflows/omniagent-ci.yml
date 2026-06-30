@@ -1,0 +1,76 @@
+name: OmniAgent CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main, master]
+  issues:
+    types: [assigned]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  test:
+    name: OmniAgent Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2f  # v5.3.0
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pyyaml
+
+      - name: Run OmniAgent tests
+        run: pytest tests/omniagent/ -v --tb=short
+
+  validate-agents:
+    name: Validate Agent Definitions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2f  # v5.3.0
+        with:
+          python-version: "3.11"
+
+      - name: Install pyyaml
+        run: pip install pyyaml
+
+      - name: Validate .agent.md frontmatter
+        run: |
+          python - <<'EOF'
+          import yaml, sys
+          from pathlib import Path
+          errors = []
+          for f in Path(".github/agents").glob("*.agent.md"):
+              parts = f.read_text().split("---", 2)
+              if len(parts) < 3:
+                  errors.append(f"{f.name}: missing frontmatter")
+                  continue
+              try:
+                  fm = yaml.safe_load(parts[1])
+                  for field in ("name", "description"):
+                      if field not in fm:
+                          errors.append(f"{f.name}: missing field '{field}'")
+              except yaml.YAMLError as e:
+                  errors.append(f"{f.name}: invalid YAML — {e}")
+          if errors:
+              print("ERRORS:")
+              for e in errors:
+                  print(f"  {e}")
+              sys.exit(1)
+          print(f"All {len(list(Path('.github/agents').glob('*.agent.md')))} agent files valid.")
+          EOF
