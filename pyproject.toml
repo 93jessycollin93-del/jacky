@@ -7,5 +7,5 @@ readme = "README.md"
 license = { text = "MIT" }
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["."]
 python_files = ["test_*.py"]
