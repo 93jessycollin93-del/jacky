@@ -10,7 +10,10 @@ import sys
 import hmac
 import secrets as _secrets
 import logging
+import random
+import threading
 import psutil
+from collections import deque
 from pathlib import Path
 from functools import wraps
 from flask import (Flask, jsonify, request, send_file, session,
@@ -147,10 +150,7 @@ def _gate():
 # compression, benchmark, adversary simulation) against abuse/DoS, since
 # this app is internet-exposed via the Cloudflare Tunnel.
 # ----------------------------------------------------------------------------
-import threading as _threading
-from collections import deque as _deque
-
-_rate_lock = _threading.Lock()
+_rate_lock = threading.Lock()
 _rate_buckets = {}
 
 def rate_limit(max_calls=20, window_seconds=60):
@@ -162,7 +162,7 @@ def rate_limit(max_calls=20, window_seconds=60):
             key = (ident, fn.__name__)
             now = datetime.utcnow().timestamp()
             with _rate_lock:
-                bucket = _rate_buckets.setdefault(key, _deque())
+                bucket = _rate_buckets.setdefault(key, deque())
                 while bucket and now - bucket[0] > window_seconds:
                     bucket.popleft()
                 if len(bucket) >= max_calls:
@@ -1256,7 +1256,6 @@ def api_condenser_adversary():
     """Run the adversarial co-evolution layer with bounded, safe parameters."""
     if not single_action_impacts:
         return jsonify({"error": "condenser adversary unavailable"}), 503
-    import random as _random
     try:
         budget = max(1, min(5, int(request.args.get("budget", 3))))
     except ValueError:
@@ -1272,7 +1271,7 @@ def api_condenser_adversary():
         _, learned_ef, learned_iv = failure_of(chosen, **kw)
         attack_names = [f"{ACTIONS[i][0]} {ACTIONS[i][1][0]}->{ACTIONS[i][1][1]}" for i in chosen]
         rand_fs = []
-        rng = _random.Random(7)
+        rng = random.Random(7)
         for _ in range(10):
             rc = rng.sample(range(N_ACTIONS), len(chosen)) if chosen else []
             rand_fs.append(failure_of(rc, **kw)[0])
