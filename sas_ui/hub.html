@@ -443,6 +443,13 @@ async function loadSquads() {
   }
 }
 
+function esc(s) {
+  if (s == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
 function renderSquads(squads) {
   const container = document.getElementById('squad-list');
   const squadColors = { coding: '#00d4ff', security: '#ef4444', archivist: '#8b5cf6' };
@@ -451,28 +458,28 @@ function renderSquads(squads) {
     const color = squadColors[squad] || '#888';
     const isCollapsed = localStorage.getItem(`squad_${squad}_collapsed`) === '1' ? 'collapsed' : '';
     html += `
-      <div class="squad-section ${isCollapsed}" id="section-${squad}">
-        <div class="squad-header" onclick="toggleSection('${squad}')">
+      <div class="squad-section ${isCollapsed}" id="section-${esc(squad)}">
+        <div class="squad-header" onclick="toggleSection('${esc(squad)}')">
           <span class="squad-dot" style="background:${color}"></span>
-          ${squad.toUpperCase()} (${info.count})
+          ${esc(squad.toUpperCase())} (${esc(info.count)})
           <span class="squad-toggle">▾</span>
         </div>
         <div class="squad-bots">`;
     for (const bot of (info.bots || [])) {
-      const initials = bot.name.slice(0,2).toUpperCase();
+      const initials = esc(String(bot.name || '').slice(0,2).toUpperCase());
       const isActive = bot.id === activeBot ? 'active' : '';
       html += `
-          <div class="bot-item ${isActive}" id="bot-${bot.id}" onclick="selectBot('${squad}','${bot.id}')">
-            <div class="bot-avatar" style="background:${bot.color || color}">${initials}</div>
-            ${bot.name}
-            <span class="bot-role">${bot.role}</span>
+          <div class="bot-item ${isActive}" id="bot-${esc(bot.id)}" onclick="selectBot('${esc(squad)}','${esc(bot.id)}')">
+            <div class="bot-avatar" style="background:${esc(bot.color || color)}">${initials}</div>
+            ${esc(bot.name)}
+            <span class="bot-role">${esc(bot.role)}</span>
           </div>`;
     }
     html += `
         </div>
         <div class="squad-action">
-          <button onclick="setSquad('${squad}','ask')">Ask Lead</button>
-          <button onclick="setSquad('${squad}','discuss')">All Reply</button>
+          <button onclick="setSquad('${esc(squad)}','ask')">Ask Lead</button>
+          <button onclick="setSquad('${esc(squad)}','discuss')">All Reply</button>
         </div>
       </div>`;
   }
@@ -590,7 +597,7 @@ async function pollModels() {
     }
     list.innerHTML = models.slice(0, 6).map(m => `
       <div class="model-chip">
-        <span>${m.name.split(':')[0]}</span>
+        <span>${esc(String(m.name || '').split(':')[0])}</span>
         <span class="model-state">●</span>
       </div>`).join('');
   } catch(e) {}
