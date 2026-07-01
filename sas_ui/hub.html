@@ -459,7 +459,7 @@ function renderSquads(squads) {
     const isCollapsed = localStorage.getItem(`squad_${squad}_collapsed`) === '1' ? 'collapsed' : '';
     html += `
       <div class="squad-section ${isCollapsed}" id="section-${esc(squad)}">
-        <div class="squad-header" onclick="toggleSection('${esc(squad)}')">
+        <div class="squad-header" data-squad="${esc(squad)}">
           <span class="squad-dot" style="background:${color}"></span>
           ${esc(squad.toUpperCase())} (${esc(info.count)})
           <span class="squad-toggle">▾</span>
@@ -469,7 +469,7 @@ function renderSquads(squads) {
       const initials = esc(String(bot.name ?? '').slice(0,2).toUpperCase());
       const isActive = bot.id === activeBot ? 'active' : '';
       html += `
-          <div class="bot-item ${isActive}" id="bot-${esc(bot.id)}" onclick="selectBot('${esc(squad)}','${esc(bot.id)}')">
+          <div class="bot-item ${isActive}" id="bot-${esc(bot.id)}" data-squad="${esc(squad)}" data-bot-id="${esc(bot.id)}">
             <div class="bot-avatar" style="background:${esc(bot.color || color)}">${initials}</div>
             ${esc(bot.name)}
             <span class="bot-role">${esc(bot.role)}</span>
@@ -477,13 +477,34 @@ function renderSquads(squads) {
     }
     html += `
         </div>
-        <div class="squad-action">
-          <button onclick="setSquad('${esc(squad)}','ask')">Ask Lead</button>
-          <button onclick="setSquad('${esc(squad)}','discuss')">All Reply</button>
+        <div class="squad-action" data-squad="${esc(squad)}">
+          <button data-mode="ask">Ask Lead</button>
+          <button data-mode="discuss">All Reply</button>
         </div>
       </div>`;
   }
   container.innerHTML = html;
+
+  container.querySelectorAll('.squad-header').forEach(el => {
+    el.addEventListener('click', () => {
+      toggleSection(el.dataset.squad);
+    });
+  });
+
+  container.querySelectorAll('.bot-item').forEach(el => {
+    el.addEventListener('click', () => {
+      selectBot(el.dataset.squad, el.dataset.botId);
+    });
+  });
+
+  container.querySelectorAll('.squad-action').forEach(actionDiv => {
+    const squad = actionDiv.dataset.squad;
+    actionDiv.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        setSquad(squad, btn.dataset.mode);
+      });
+    });
+  });
 }
 
 function toggleSection(squad) {
