@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Condenser Adversary — Jacky</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0a0e27">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0a0e27; --bg2: #0f1535; --bg3: #1a2040;
+  --border: rgba(0,212,255,.18);
+  --accent: #00d4ff; --accent2: #0099ff;
+  --text: #e0e8ff; --muted: #7090b0;
+  --danger: #ef4444; --warn: #f59e0b; --ok: #10b981;
+  --radius: 12px;
+}
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg); color: var(--text);
+  min-height: 100vh; display: flex; flex-direction: column;
+}
+.topbar {
+  display: flex; align-items: center; gap: 14px; padding: 10px 18px;
+  background: var(--bg2); border-bottom: 1px solid var(--border); height: 52px;
+}
+.topbar .logo { font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: .5px; }
+.nav-links { display: flex; gap: 4px; }
+.nav-links a {
+  font-size: 12px; color: var(--muted); text-decoration: none;
+  padding: 5px 10px; border-radius: 6px; transition: background .15s, color .15s;
+}
+.nav-links a:hover, .nav-links a.active { background: rgba(0,212,255,.1); color: var(--accent); }
+.spacer { flex: 1; }
+
+main { flex: 1; padding: 24px; max-width: 1040px; width: 100%; margin: 0 auto; }
+h1 { font-size: 20px; margin-bottom: 4px; }
+.subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+
+.controls { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+input[type=number] { width: 90px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+button#run-btn {
+  background: var(--accent2); color: #04101c; border: none; border-radius: 8px;
+  padding: 8px 18px; font-weight: 600; cursor: pointer; font-size: 13px;
+}
+button#run-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.score-card { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+.score-tile { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; min-width: 170px; }
+.score-tile .num { font-size: 26px; font-weight: 700; color: var(--accent); }
+.score-tile .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 4px; }
+
+.panel { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 18px; }
+.panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); margin-bottom: 12px; }
+
+.bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12px; }
+.bar-row .name { width: 130px; flex-shrink: 0; }
+.bar-track { flex: 1; height: 14px; background: var(--bg3); border-radius: 7px; overflow: hidden; }
+.bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent2), var(--danger)); }
+.bar-val { width: 50px; text-align: right; flex-shrink: 0; }
+
+.attack-list { list-style: none; }
+.attack-list li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+
+.error-box { color: var(--danger); font-size: 13px; padding: 10px; border: 1px solid var(--danger); border-radius: 8px; display: none; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="logo">⬡ JACKY</span>
+  <nav class="nav-links">
+    <a href="/hub">Hub</a>
+    <a href="/chat">Chat</a>
+    <a href="/dashboard">SAS</a>
+    <a href="/condenser">Condenser</a>
+    <a href="/condenser/benchmark">Benchmark</a>
+    <a href="/condenser/adversary" class="active">Adversary</a>
+  </nav>
+  <span class="spacer"></span>
+</header>
+
+<main>
+  <h1>Adversarial Co-Evolution</h1>
+  <p class="subtitle">Worst-case robustness for <code>condenser_adversary.py</code> — learned attacks vs. random noise.</p>
+
+  <div class="controls">
+    <label>Budget <input type="number" id="budget-input" value="3" min="1" max="5"></label>
+    <label>Keep threshold <input type="number" id="keep-input" value="0.30" min="0.05" max="0.9" step="0.05"></label>
+    <button id="run-btn">Run Adversary</button>
+  </div>
+
+  <div class="error-box" id="error-box"></div>
+
+  <div class="score-card" id="score-card" style="display:none;">
+    <div class="score-tile"><div class="num" id="no-attack">—</div><div class="lbl">No-attack failure</div></div>
+    <div class="score-tile"><div class="num" id="learned-fail">—</div><div class="lbl">Learned attack failure</div></div>
+    <div class="score-tile"><div class="num" id="random-fail">—</div><div class="lbl">Random attack failure</div></div>
+    <div class="score-tile"><div class="num" id="advantage">—</div><div class="lbl">Learning advantage</div></div>
+  </div>
+
+  <section class="panel" id="brittleness-panel" style="display:none;">
+    <h2>Structural Brittleness Map</h2>
+    <div id="brittleness-bars"></div>
+  </section>
+
+  <section class="panel" id="attack-panel" style="display:none;">
+    <h2>Greedy Attack Sequence</h2>
+    <ul class="attack-list" id="attack-list"></ul>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const errorBox = $('error-box');
+
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.style.display = msg ? 'block' : 'none';
+}
+
+$('run-btn').addEventListener('click', async () => {
+  showError('');
+  const btn = $('run-btn');
+  btn.disabled = true;
+  const budget = Number($('budget-input').value) || 3;
+  const keep = Number($('keep-input').value) || 0.30;
+  try {
+    const res = await fetch(`/api/condenser/adversary?budget=${encodeURIComponent(budget)}&keep=${encodeURIComponent(keep)}`);
+    const data = await res.json();
+    if (!res.ok) {
+      showError(data.message || data.error || 'Request failed.');
+      return;
+    }
+    $('score-card').style.display = 'flex';
+    $('no-attack').textContent = data.no_attack_failure;
+    $('learned-fail').textContent = data.learned_failure;
+    $('random-fail').textContent = data.random_failure;
+    $('advantage').textContent = (data.learning_advantage > 0 ? '+' : '') + data.learning_advantage;
+
+    const bars = $('brittleness-bars');
+    bars.innerHTML = '';
+    const map = data.brittleness_map || [];
+    const maxImpact = Math.max(0.01, ...map.map((r) => r.impact));
+    map.slice(0, 12).forEach((r) => {
+      const row = document.createElement('div');
+      row.className = 'bar-row';
+
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = `${r.kind} ${r.edge}`; // textContent only
+
+      const track = document.createElement('div');
+      track.className = 'bar-track';
+      const fill = document.createElement('div');
+      fill.className = 'bar-fill';
+      fill.style.width = `${Math.max(2, (r.impact / maxImpact) * 100)}%`;
+      track.appendChild(fill);
+
+      const val = document.createElement('div');
+      val.className = 'bar-val';
+      val.textContent = r.impact;
+
+      row.appendChild(name);
+      row.appendChild(track);
+      row.appendChild(val);
+      bars.appendChild(row);
+    });
+    $('brittleness-panel').style.display = 'block';
+
+    const list = $('attack-list');
+    list.innerHTML = '';
+    (data.greedy_attack || []).forEach((name, i) => {
+      const li = document.createElement('li');
+      const gain = (data.marginal_gains || [])[i];
+      li.textContent = `${i + 1}. ${name}` + (gain !== undefined ? `  (marginal damage: ${gain})` : '');
+      list.appendChild(li);
+    });
+    $('attack-panel').style.display = 'block';
+  } catch (e) {
+    showError('Network error.');
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
