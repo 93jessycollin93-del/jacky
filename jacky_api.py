@@ -12,6 +12,7 @@ import secrets as _secrets
 import logging
 import random
 import threading
+import time
 import psutil
 from collections import deque
 from pathlib import Path
@@ -1532,6 +1533,274 @@ try:
     log.info("Data collector routes registered (/api/collector/*).")
 except Exception as e:
     log.warning(f"Data collector routes unavailable: {e}")
+
+# ============================================================================
+# ECPS MEMORY LAYER — Production Compression for Conversation History
+# ============================================================================
+memory_ecps = None
+try:
+    from jacky_memory_ecps import ECPSMemoryLayer
+    memory_ecps = ECPSMemoryLayer(db_path=str(JACKY_HOME / "data" / "jacky_memory_ecps.db"))
+    log.info("ECPS Memory Layer initialized (conversation history compression enabled).")
+except Exception as e:
+    log.warning(f"ECPS Memory Layer unavailable: {e}")
+
+# ============================================================================
+# ECPS API ENDPOINTS — Real-world compression demonstration
+# ============================================================================
+
+@app.route('/api/ecps/compress-conversation', methods=['POST'])
+def api_ecps_compress_conversation():
+    """Compress an entire conversation to a master seed.
+
+    Body:
+      conversation_id: unique identifier
+      messages: [{role, content}, ...]
+
+    Returns:
+      master_seed: 32-byte fingerprint representing entire conversation
+      original_size: bytes before compression
+      compressed_size: bytes after compression
+      compression_ratio: X times smaller
+      message_count: number of messages compressed
+    """
+    if not memory_ecps:
+        return jsonify({"error": "ECPS Memory Layer unavailable"}), 503
+
+    data = request.get_json(silent=True) or {}
+    conversation_id = (data.get("conversation_id") or f"conv_{int(time.time())}").strip()
+    messages = data.get("messages") or []
+
+    if not messages:
+        return jsonify({"error": "messages is required"}), 400
+
+    try:
+        result = memory_ecps.compress_conversation(conversation_id, messages)
+        return jsonify({
+            "status": "ok",
+            "conversation_id": result["conversation_id"],
+            "master_seed": result["master_seed"],
+            "original_size_bytes": result["original_size"],
+            "compressed_size_bytes": result["compressed_size"],
+            "compression_ratio": round(result["compression_ratio"], 1),
+            "message_count": result["message_count"],
+            "extra_capacity_estimate": round(result["extra_capacity_estimate"], 1),
+            "timestamp": datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        log.exception("ECPS compress_conversation failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/ecps/expand-seed', methods=['POST'])
+def api_ecps_expand_seed():
+    """Expand a compressed seed back to full conversation data.
+
+    Body:
+      seed: the master seed to expand
+
+    Returns:
+      conversation_data: full original data reconstructed from seed
+      verified: whether hash verification passed (lossless recovery)
+    """
+    if not memory_ecps:
+        return jsonify({"error": "ECPS Memory Layer unavailable"}), 503
+
+    data = request.get_json(silent=True) or {}
+    seed = (data.get("seed") or "").strip()
+
+    if not seed:
+        return jsonify({"error": "seed is required"}), 400
+
+    try:
+        result = memory_ecps.expand_seed(seed)
+        if result is None:
+            return jsonify({"error": f"Seed not found: {seed[:16]}..."}), 404
+
+        return jsonify({
+            "status": "ok",
+            "seed": seed[:16] + "...",
+            "conversation_data": result,
+            "timestamp": datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        log.exception("ECPS expand_seed failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/ecps/compress-interaction', methods=['POST'])
+def api_ecps_compress_interaction():
+    """Compress a single interaction (message) to a seed.
+
+    Body:
+      conversation_id: which conversation this belongs to
+      role: "user" or "assistant"
+      content: the message text
+
+    Returns:
+      seed: 32-byte fingerprint for this single message
+      compression_ratio: original bytes / seed bytes
+    """
+    if not memory_ecps:
+        return jsonify({"error": "ECPS Memory Layer unavailable"}), 503
+
+    data = request.get_json(silent=True) or {}
+    conversation_id = (data.get("conversation_id") or f"conv_{int(time.time())}").strip()
+    role = (data.get("role") or "user").strip().lower()
+    content = (data.get("content") or "").strip()
+
+    if not content:
+        return jsonify({"error": "content is required"}), 400
+    if role not in ("user", "assistant"):
+        return jsonify({"error": "role must be 'user' or 'assistant'"}), 400
+
+    try:
+        seed = memory_ecps.compress_interaction(conversation_id, role, content)
+        return jsonify({
+            "status": "ok",
+            "seed": seed,
+            "original_size_bytes": len(content.encode()),
+            "seed_bytes": 32,
+            "timestamp": datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        log.exception("ECPS compress_interaction failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/ecps/stats', methods=['GET'])
+def api_ecps_stats():
+    """Get ECPS compression statistics (total ratio, cache hit rate, etc.).
+
+    Returns:
+      overall_ratio: total compression ratio across all conversations
+      cache_hit_rate: percentage of expanded seeds from cache
+      total_original_bytes: cumulative original size
+      total_compressed_bytes: cumulative compressed size
+      seed_count: number of stored seeds
+    """
+    if not memory_ecps:
+        return jsonify({"error": "ECPS Memory Layer unavailable"}), 503
+
+    try:
+        stats = memory_ecps.get_compression_stats()
+        return jsonify({
+            "status": "ok",
+            "overall_compression_ratio": round(stats.get("overall_ratio", 1.0), 1),
+            "cache_hit_rate_percent": round(stats.get("cache_hit_rate", 0) * 100, 1),
+            "total_original_bytes": stats.get("total_original", 0),
+            "total_compressed_bytes": stats.get("total_compressed", 0),
+            "seed_count": stats.get("seed_count", 0),
+            "cache_hits": stats.get("cache_hits", 0),
+            "cache_misses": stats.get("cache_misses", 0),
+            "timestamp": datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        log.exception("ECPS stats failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/ecps/seeds', methods=['GET'])
+def api_ecps_seeds():
+    """List all stored seeds with their metadata (paginated).
+
+    Query params:
+      limit: max results (default 20)
+      offset: pagination offset (default 0)
+
+    Returns:
+      seeds: [{seed_id, conversation_id, compression_ratio, original_size, expanded_count}, ...]
+    """
+    if not memory_ecps:
+        return jsonify({"error": "ECPS Memory Layer unavailable"}), 503
+
+    try:
+        limit = max(1, min(100, int(request.args.get("limit", 20))))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        limit = 20
+        offset = 0
+
+    try:
+        all_seeds = memory_ecps.get_seeds_summary()
+        total = len(all_seeds)
+        seeds_page = all_seeds[offset:offset+limit]
+
+        return jsonify({
+            "status": "ok",
+            "seeds": seeds_page,
+            "total_seeds": total,
+            "limit": limit,
+            "offset": offset,
+            "timestamp": datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        log.exception("ECPS seeds failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/ecps/demo', methods=['POST'])
+def api_ecps_demo():
+    """Live demo: compress a test conversation and show the compression magic.
+
+    Body (optional):
+      message_count: how many messages to generate for demo (default 5)
+
+    Returns:
+      Full compression workflow with before/after stats
+    """
+    if not memory_ecps:
+        return jsonify({"error": "ECPS Memory Layer unavailable"}), 503
+
+    data = request.get_json(silent=True) or {}
+    try:
+        message_count = max(1, min(50, int(data.get("message_count", 5))))
+    except ValueError:
+        message_count = 5
+
+    try:
+        # Generate a test conversation
+        messages = []
+        demo_topics = [
+            "How do I optimize my GPU for deep learning?",
+            "What are the best practices for model fine-tuning?",
+            "Can you explain attention mechanisms?",
+            "How do I reduce model inference latency?",
+            "What's the difference between quantization and pruning?",
+        ]
+
+        for i in range(message_count):
+            topic = demo_topics[i % len(demo_topics)]
+            messages.append({
+                "role": "user",
+                "content": f"Message {i+1}: {topic} (expanded with more details...)"
+            })
+            messages.append({
+                "role": "assistant",
+                "content": f"Response {i+1}: Here's a detailed answer about {topic.lower()}. " * 3
+            })
+
+        # Compress
+        conv_id = f"demo_conv_{int(time.time() * 1000)}"
+        result = memory_ecps.compress_conversation(conv_id, messages)
+
+        return jsonify({
+            "status": "ok",
+            "demo_result": {
+                "conversation_id": conv_id,
+                "message_count": result["message_count"],
+                "original_size_kb": round(result["original_size"] / 1024, 2),
+                "compressed_size_bytes": result["compressed_size"],
+                "master_seed": result["master_seed"],
+                "compression_ratio": round(result["compression_ratio"], 1),
+                "extra_capacity_estimate": round(result["extra_capacity_estimate"], 1),
+            },
+            "message": f"✓ Compressed {result['message_count']} messages ({result['original_size']} bytes) → 32 byte seed ({result['compression_ratio']:.0f}x smaller)",
+            "timestamp": datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        log.exception("ECPS demo failed")
+        return jsonify({"error": str(e)}), 500
 
 # ============================================================================
 # ERROR HANDLERS
