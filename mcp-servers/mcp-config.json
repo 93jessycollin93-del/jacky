@@ -1,0 +1,71 @@
+{
+  "mcpServers": {
+    "jacky-mcp-server": {
+      "description": "Primary MCP server exposing Jacky's core capabilities as tools.",
+      "command": "python",
+      "args": ["mcp-servers/jacky_mcp_server.py"],
+      "env": {
+        "OLLAMA_HOST": "${OLLAMA_HOST:-http://localhost:11434}",
+        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
+        "GEMINI_API_KEY": "${GEMINI_API_KEY}",
+        "GROQ_API_KEY": "${GROQ_API_KEY}"
+      },
+      "tools": [
+        {
+          "name": "jacky_route_task",
+          "description": "Route a task to the cheapest capable AI model (Ollama → Groq → Gemini → Claude).",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "task": { "type": "string", "description": "The task or prompt to route." },
+              "max_cost_tier": {
+                "type": "string",
+                "enum": ["local", "free_cloud", "paid_cloud", "any"],
+                "default": "any"
+              }
+            },
+            "required": ["task"]
+          }
+        },
+        {
+          "name": "jacky_get_system_status",
+          "description": "Return current GPU temperature, CPU %, RAM %, and active model list.",
+          "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+          "name": "jacky_list_models",
+          "description": "List all locally available Ollama models and their status.",
+          "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+          "name": "jacky_pull_model",
+          "description": "Pull (download) an Ollama model by name.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "model_name": { "type": "string", "description": "e.g. llama3.2:3b" }
+            },
+            "required": ["model_name"]
+          }
+        }
+      ]
+    },
+    "filesystem-mcp": {
+      "description": "Standard MCP filesystem server for repo operations.",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "tools": [
+        "read_file", "write_file", "edit_file", "list_directory",
+        "create_directory", "move_file", "search_files", "get_file_info"
+      ]
+    },
+    "github-mcp": {
+      "description": "Official GitHub MCP server.",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    }
+  }
+}
