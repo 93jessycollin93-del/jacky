@@ -142,3 +142,41 @@ def test_copy_raises_if_dst_exists():
     write_file(dst, "b")
     with pytest.raises(FileExistsError):
         copy_file(src, dst)
+
+
+def test_copy_file_creates_missing_parent_dirs():
+    src = str(_SCRATCH / "src3.txt")
+    dst = str(_SCRATCH / "nested" / "dir" / "dst3.txt")
+    write_file(src, "hello")
+    copy_file(src, dst)
+    assert read_file(dst) == "hello"
+
+
+# ── additional edge cases ─────────────────────────────────────────────────────
+
+def test_read_file_missing_raises_file_not_found():
+    with pytest.raises(FileNotFoundError):
+        read_file(str(_SCRATCH / "does_not_exist.txt"))
+
+
+def test_write_file_empty_content():
+    path = str(_SCRATCH / "empty.txt")
+    write_file(path, "")
+    assert read_file(path) == ""
+
+
+def test_list_files_returns_empty_list_when_no_match():
+    files = list_files(str(_SCRATCH), "*.nonexistent")
+    assert files == []
+
+
+def test_safe_path_normalizes_dot_dot_within_root():
+    """A relative path containing '..' that still resolves inside the repo
+    root should be allowed (only paths that escape the root are rejected)."""
+    p = _safe_path("tests/agent_tests/../../config.json")
+    assert p == _REPO_ROOT / "config.json"
+
+
+def test_safe_path_rejects_git_directory():
+    with pytest.raises(PermissionError, match="protected"):
+        _safe_path(".git/config")

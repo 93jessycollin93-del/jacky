@@ -4,6 +4,7 @@ tests/agent_tests/test_shell_tool.py — Unit tests for tools/shell_tool.py
 """
 
 import pathlib
+import subprocess
 import pytest
 import sys
 
@@ -54,3 +55,36 @@ def test_allowlist_override():
     # With check_allowlist=False an arbitrary (safe) command works
     result = run_command("ls -1 .", check_allowlist=False)
     assert result["returncode"] == 0
+
+
+# ── Blocklist takes priority ─────────────────────────────────────────────────
+
+def test_blocklist_checked_even_for_allowlisted_prefix():
+    """A command that starts with an allowlisted prefix (e.g. 'echo') but
+    contains a blocked substring (e.g. 'shutdown') must still be blocked."""
+    with pytest.raises(PermissionError, match="blocked"):
+        run_command("echo hi; shutdown now")
+
+
+# ── cwd handling ─────────────────────────────────────────────────────────────
+
+def test_run_command_respects_cwd(tmp_path):
+    (tmp_path / "marker.txt").write_text("x")
+    result = run_command("ls -1 .", cwd=str(tmp_path), check_allowlist=False)
+    assert result["returncode"] == 0
+    assert "marker.txt" in result["stdout"]
+
+
+# ── timeout handling ─────────────────────────────────────────────────────────
+
+def test_run_command_raises_on_timeout():
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_command("find / -name nonexistent_xyz", check_allowlist=False, timeout=0.01)
+
+
+# ── stderr capture ───────────────────────────────────────────────────────────
+
+def test_stderr_is_captured_on_failure():
+    result = run_command("ls /path/does/not/exist_xyz")
+    assert result["returncode"] != 0
+    assert result["stderr"] != ""
