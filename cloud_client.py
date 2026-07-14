@@ -39,7 +39,7 @@ except Exception as _e:  # pragma: no cover - fallback to standard verification
 
 # Provider presets: base_url + a sensible default model.
 PROVIDERS = {
-    "xai":    {"url": "https://api.x.ai/v1/chat/completions",            "model": "grok-beta"},
+    "xai":    {"url": "https://api.x.ai/v1/chat/completions",            "model": "grok-4"},
     "groq":   {"url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
     "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "model": "gemini-2.0-flash"},
     "openrouter": {"url": "https://openrouter.ai/api/v1/chat/completions", "model": "meta-llama/llama-3.3-70b-instruct:free"},
@@ -52,6 +52,13 @@ PROVIDERS = {
     # RunPod serverless is per-endpoint: replace <ENDPOINT_ID> with your vLLM
     # endpoint id, then set the model to whatever that endpoint serves.
     "runpod":     {"url": "https://api.runpod.ai/v2/<ENDPOINT_ID>/openai/v1/chat/completions", "model": "<your-deployed-model>"},
+    # New providers (Jun 2026 subscriptions).
+    # vertex_ai URL is built dynamically from VERTEX_AI_PROJECT_ID (see CloudClient.__init__).
+    "vertex_ai":  {"url": "https://us-central1-aiplatform.googleapis.com/v1/projects/{project_id}/locations/us-central1/endpoints/openapi/chat/completions", "model": "google/gemini-2.0-flash-001"},
+    # Emergent Standard Plan — 100 credits/month; OpenAI-compatible shape assumed.
+    "emergent":   {"url": "https://api.emergent.sh/v1/chat/completions", "model": "emergent-standard"},
+    # GitHub Copilot Pro — requires GITHUB_COPILOT_TOKEN with copilot scope.
+    "copilot":    {"url": "https://api.githubcopilot.com/chat/completions", "model": "gpt-4o"},
 }
 
 class CloudError(RuntimeError):
@@ -66,7 +73,13 @@ class CloudClient:
         if provider not in PROVIDERS:
             raise ValueError(f"Unknown provider '{provider}'. Known: {list(PROVIDERS)}")
         self.provider = provider
-        self.url = PROVIDERS[provider]["url"]
+        url_template = PROVIDERS[provider]["url"]
+        # vertex_ai needs the GCP project ID injected into the URL.
+        if provider == "vertex_ai":
+            import os
+            project_id = os.getenv("VERTEX_AI_PROJECT_ID", "YOUR_PROJECT_ID")
+            url_template = url_template.replace("{project_id}", project_id)
+        self.url = url_template
         self.model = model or PROVIDERS[provider]["model"]
         self.keys = [k for k in keys if k]
         self.timeout = timeout

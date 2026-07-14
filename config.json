@@ -7,24 +7,87 @@
     "cloud_bots": {
       "enabled": true,
       "providers": [
-        "groq"
+        "vertex_ai",
+        "copilot",
+        "gemini",
+        "xai",
+        "groq",
+        "emergent"
       ]
     }
   },
   "cloud_providers": {
+    "vertex_ai": { "enabled": true },
+    "copilot":   { "enabled": true },
+    "groq":      { "enabled": true },
+    "gemini":    { "enabled": true },
+    "xai":       { "enabled": true },
+    "emergent":  { "enabled": true },
+    "openrouter":{ "enabled": false }
+  },
+  "provider_limits": {
+    "vertex_ai": {
+      "max_tokens_per_minute": 100000,
+      "max_requests_per_minute": 300
+    },
+    "copilot": {
+      "max_tokens_per_minute": 40000,
+      "max_requests_per_minute": 100
+    },
+    "xai": {
+      "max_tokens_per_minute": 60000,
+      "max_requests_per_minute": 100
+    },
     "groq": {
-      "enabled": true
+      "max_tokens_per_minute": 6000,
+      "max_requests_per_minute": 30
     },
     "gemini": {
-      "enabled": false
+      "max_tokens_per_minute": 15000,
+      "max_requests_per_minute": 60
+    },
+    "emergent": {
+      "max_tokens_per_minute": 20000,
+      "max_requests_per_minute": 50
     },
     "openrouter": {
-      "enabled": false
+      "max_tokens_per_minute": 100000,
+      "max_requests_per_minute": 200
     }
+  },
+  "credits": {
+    "vertex_ai": {
+      "balance_usd": 415,
+      "currency": "CAD",
+      "expires": "2026-09-22",
+      "note": "Google Cloud prepay credits — burn before expiry"
+    },
+    "emergent": {
+      "balance_credits": 100,
+      "reset": "monthly",
+      "note": "100 credits/month Standard Plan"
+    }
+  },
+  "cost_per_token": {
+    "vertex_ai":  0.000000075,
+    "gemini":     0.000000075,
+    "xai":        0.000005,
+    "groq":       0.0,
+    "emergent":   0.0,
+    "copilot":    0.0,
+    "openrouter": 0.000001
   },
   "power_mode": "performance",
   "runtime_controls": {
     "active": true,
     "thinking_mode": "fast"
+  },
+  "rag": {
+    "enabled": true,
+    "db_path": "data/jacky_knowledge.db",
+    "model": "all-minilm-l6-v2",
+    "chunk_size": 512,
+    "top_k": 5,
+    "max_context_chars": 2000
   }
 }

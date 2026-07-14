@@ -153,9 +153,20 @@ class SquadManager:
 
     def _find_relevant_snippets(self, prompt: str, max_snippets: int) -> list[str]:
         """
-        Simple keyword-based relevance: scan memory files for lines that
-        share words with the prompt. Returns up to max_snippets excerpts.
+        Find relevant context snippets using RAG (if available) or keyword search.
+        RAG uses semantic similarity on the vector index for better relevance.
+        Keyword search falls back if RAG unavailable.
         """
+        # Try RAG first
+        try:
+            from rag_retriever import query_rag
+            chunks = query_rag(prompt, top_k=max_snippets)
+            if chunks:
+                return [f"[{c['source_file']}] {c['text'][:300]}" for c in chunks]
+        except Exception as e:
+            log.debug(f"RAG retrieval failed: {e}; falling back to keyword search")
+
+        # Fallback: keyword-based search (original implementation)
         if not MEMORY_DIR.exists():
             return []
 
