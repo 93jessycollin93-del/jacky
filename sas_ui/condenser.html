@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Condenser — Jacky</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0a0e27">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0a0e27; --bg2: #0f1535; --bg3: #1a2040;
+  --border: rgba(0,212,255,.18);
+  --accent: #00d4ff; --accent2: #0099ff;
+  --text: #e0e8ff; --muted: #7090b0;
+  --danger: #ef4444; --warn: #f59e0b; --ok: #10b981;
+  --radius: 12px;
+}
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg); color: var(--text);
+  min-height: 100vh; display: flex; flex-direction: column;
+}
+.topbar {
+  display: flex; align-items: center; gap: 14px; padding: 10px 18px;
+  background: var(--bg2); border-bottom: 1px solid var(--border); height: 52px;
+}
+.topbar .logo { font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: .5px; }
+.nav-links { display: flex; gap: 4px; }
+.nav-links a {
+  font-size: 12px; color: var(--muted); text-decoration: none;
+  padding: 5px 10px; border-radius: 6px; transition: background .15s, color .15s;
+}
+.nav-links a:hover, .nav-links a.active { background: rgba(0,212,255,.1); color: var(--accent); }
+.spacer { flex: 1; }
+
+main { flex: 1; padding: 24px; max-width: 980px; width: 100%; margin: 0 auto; }
+h1 { font-size: 20px; margin-bottom: 4px; }
+.subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+
+.console { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 860px) { .console { grid-template-columns: 1fr; } }
+
+.panel { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); margin-bottom: 12px; }
+
+textarea#input-text {
+  width: 100%; min-height: 220px; resize: vertical;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-family: inherit; font-size: 13px; padding: 10px;
+}
+.controls { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+select, input[type=range] { background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+button#run-btn {
+  background: var(--accent2); color: #04101c; border: none; border-radius: 8px;
+  padding: 8px 18px; font-weight: 600; cursor: pointer; font-size: 13px;
+}
+button#run-btn:disabled { opacity: .5; cursor: not-allowed; }
+.density-label { font-size: 12px; color: var(--muted); }
+
+.result-row { margin-bottom: 14px; }
+.result-row .k { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 4px; }
+.result-row .v { font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: rgba(0,212,255,.12); color: var(--accent); margin-right: 6px; }
+.error-box { color: var(--danger); font-size: 13px; padding: 10px; border: 1px solid var(--danger); border-radius: 8px; display: none; }
+
+.stars-list { list-style: none; margin-top: 10px; max-height: 260px; overflow-y: auto; }
+.stars-list li { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.stars-list .meta { color: var(--muted); font-size: 11px; }
+.char-count { font-size: 11px; color: var(--muted); margin-left: auto; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="logo">⬡ JACKY</span>
+  <nav class="nav-links">
+    <a href="/hub">Hub</a>
+    <a href="/chat">Chat</a>
+    <a href="/dashboard">SAS</a>
+    <a href="/condenser" class="active">Condenser</a>
+    <a href="/condenser/benchmark">Benchmark</a>
+    <a href="/condenser/adversary">Adversary</a>
+  </nav>
+  <span class="spacer"></span>
+</header>
+
+<main>
+  <h1>Knowledge Condenser</h1>
+  <p class="subtitle">Live compression console — wraps <code>bots/condenser_bot.py</code> unchanged.</p>
+
+  <div class="console">
+    <section class="panel">
+      <h2>Input</h2>
+      <textarea id="input-text" maxlength="20000" placeholder="Paste text to condense..."></textarea>
+      <div class="controls">
+        <select id="specialization-select"><option value="baseline">baseline</option></select>
+        <span class="density-label">density: <span id="density-value">0 (auto)</span></span>
+        <input type="range" id="density-range" min="0" max="100" value="0">
+        <button id="run-btn">Condense</button>
+        <span class="char-count"><span id="char-count">0</span> / 20000</span>
+      </div>
+      <div class="error-box" id="error-box"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Result</h2>
+      <div id="result-empty" style="color: var(--muted); font-size: 13px;">Run a condensation to see output here.</div>
+      <div id="result-body" style="display:none;">
+        <div class="result-row">
+          <div class="k">Core signal</div>
+          <div class="v" id="r-core"></div>
+        </div>
+        <div class="result-row">
+          <div class="k">Resonance</div>
+          <div class="v" id="r-resonance"></div>
+        </div>
+        <div class="result-row">
+          <div class="k">Depth</div>
+          <div class="v" id="r-depth"></div>
+        </div>
+        <div class="result-row">
+          <div class="k">Tags</div>
+          <div class="v">
+            <span class="badge" id="r-specialization"></span>
+            <span class="badge" id="r-symbol"></span>
+            <span class="badge" id="r-star"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel" style="margin-top:18px;">
+    <h2>Recent Stars</h2>
+    <ul class="stars-list" id="stars-list"><li style="color:var(--muted)">No stars loaded yet.</li></ul>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const errorBox = $('error-box');
+const inputText = $('input-text');
+const charCount = $('char-count');
+const densityRange = $('density-range');
+const densityValue = $('density-value');
+const specSelect = $('specialization-select');
+const runBtn = $('run-btn');
+
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.style.display = msg ? 'block' : 'none';
+}
+
+inputText.addEventListener('input', () => {
+  charCount.textContent = inputText.value.length;
+});
+
+densityRange.addEventListener('input', () => {
+  densityValue.textContent = densityRange.value === '0' ? '0 (auto)' : densityRange.value;
+});
+
+async function loadSpecializations() {
+  try {
+    const res = await fetch('/api/condenser/specializations');
+    if (!res.ok) return;
+    const data = await res.json();
+    const specs = data.specializations || {};
+    specSelect.innerHTML = '';
+    Object.keys(specs).forEach((name) => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name; // textContent only — no HTML injection
+      specSelect.appendChild(opt);
+    });
+  } catch (e) { /* non-fatal; default option remains */ }
+}
+
+async function loadStars() {
+  try {
+    const res = await fetch('/api/condenser/stars?limit=15');
+    if (!res.ok) return;
+    const data = await res.json();
+    const list = $('stars-list');
+    list.innerHTML = '';
+    const stars = data.stars || [];
+    if (!stars.length) {
+      const li = document.createElement('li');
+      li.style.color = 'var(--muted)';
+      li.textContent = 'No stars saved yet.';
+      list.appendChild(li);
+      return;
+    }
+    stars.forEach((s) => {
+      const li = document.createElement('li');
+      const core = document.createElement('div');
+      core.textContent = s.core_signal || '';
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = `${s.specialization} · ${s.symbol} · ${s.timestamp}`;
+      li.appendChild(core);
+      li.appendChild(meta);
+      list.appendChild(li);
+    });
+  } catch (e) { /* non-fatal */ }
+}
+
+runBtn.addEventListener('click', async () => {
+  showError('');
+  const text = inputText.value;
+  if (!text.trim()) { showError('Enter some text first.'); return; }
+  runBtn.disabled = true;
+  try {
+    const res = await fetch('/api/condenser/compress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        specialization: specSelect.value || 'baseline',
+        density: Number(densityRange.value),
+        save: true,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showError(data.message || data.error || 'Request failed.');
+      return;
+    }
+    $('result-empty').style.display = 'none';
+    $('result-body').style.display = 'block';
+    // textContent everywhere below — output may contain user-supplied
+    // fragments and must never be parsed as HTML.
+    $('r-core').textContent = data.core_signal || '';
+    $('r-resonance').textContent = data.resonance || '';
+    $('r-depth').textContent = data.depth || '';
+    $('r-specialization').textContent = data.specialization || '';
+    $('r-symbol').textContent = data.symbol || '';
+    $('r-star').textContent = data.star_id ? `star:${data.star_id}` : 'not saved';
+    loadStars();
+  } catch (e) {
+    showError('Network error.');
+  } finally {
+    runBtn.disabled = false;
+  }
+});
+
+loadSpecializations();
+loadStars();
+</script>
+</body>
+</html>

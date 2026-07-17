@@ -30,6 +30,21 @@ Avg latency: 13.11s per task
 GPU temp: 51C (headroom: 24C)
 ```
 
+### Optional: keep mirrored repos fresh
+
+Add `--sync-repos` to also mirror every repo listed in `repos.json` before
+the pulse run (see `REPO_MIRROR_GUIDE.md` and `ARCHITECTURE.md` §7):
+
+```bash
+python daily_workflow.py --sync-repos
+```
+
+To run this unattended on a schedule (cron example, 6am daily):
+
+```cron
+0 6 * * * cd /path/to/jacky && python daily_workflow.py --sync-repos >> data/repo_sync.log 2>&1
+```
+
 ---
 
 ## Understanding the Metrics

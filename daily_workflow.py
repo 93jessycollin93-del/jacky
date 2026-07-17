@@ -7,19 +7,29 @@ Run this each morning to:
   2. Run a quick efficiency pulse (5 representative tasks)
   3. Log metrics to CSV for trend tracking
   4. Show health summary
+  5. (optional) Sync mirrored repos and summarize the result
 
-Usage: python daily_workflow.py [--verbose]
+Usage: python daily_workflow.py [--verbose] [--sync-repos]
 
 Output: daily_efficiency_log.csv (appended with each run)
+
+Scheduling: to keep repo mirrors fresh automatically, add a cron entry
+(or Windows Task Scheduler job) that runs this script with --sync-repos,
+e.g.:
+  0 6 * * * cd /path/to/jacky && python daily_workflow.py --sync-repos
 """
 
 import json
 import csv
+import sys
 import time
 import requests
 import statistics
 from datetime import datetime
 from pathlib import Path
+
+JACKY_HOME = Path(__file__).resolve().parent
+sys.path.insert(0, str(JACKY_HOME / "scripts"))
 
 API_URL = "http://localhost:5000/api"
 LOG_FILE = Path(__file__).parent / "daily_efficiency_log.csv"
@@ -251,12 +261,38 @@ class DailyWorkflow:
 
         print()
 
+    def sync_repos(self):
+        """Run scripts/sync_repos.py and print a one-line summary.
+
+        Network/git heavy, so this only runs when --sync-repos is passed
+        (or scheduled separately via cron), never as part of the default
+        morning pulse.
+        """
+        print("="*70)
+        print("REPO MIRROR SYNC")
+        print("="*70)
+        try:
+            import sync_repos
+            exit_code = sync_repos.main([])
+        except Exception as e:
+            print(f"  [ALERT] sync_repos failed to run: {e}\n")
+            return 1
+
+        from repo_mirror import load_status
+        status = load_status()
+        print(f"  {status.get('ok', 0)} ok, {status.get('errors', 0)} errors, "
+              f"{status.get('total', 0)} total repos.\n")
+        return exit_code
+
 
 def main():
-    import sys
     verbose = "--verbose" in sys.argv or "-v" in sys.argv
+    do_sync = "--sync-repos" in sys.argv
 
     wf = DailyWorkflow(verbose=verbose)
+
+    if do_sync:
+        wf.sync_repos()
 
     # System check
     all_ok, assess = wf.check_system()

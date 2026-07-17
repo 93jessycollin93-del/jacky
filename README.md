@@ -176,3 +176,82 @@ Jacky can monitor your Ollama models on E:\AI\Ollama\models:
 ---
 
 **Frame:** It's Jacky's PC. You're the user. Jacky is in charge, and you're learning.
+
+---
+
+## 🤖 OmniAgent — Autonomous AI Agent Layer
+
+OmniAgent is a fully-equipped autonomous agent built on top of Jacky,
+giving GitHub Copilot (and any MCP-compatible client) access to **all
+essential tools, skills, and integrations** in one place.
+
+### Features
+
+| Category | What's included |
+|----------|----------------|
+| **Tool calling** | File ops, shell commands, web fetch/search, GitHub API, code search |
+| **MCP integration** | `jacky-mcp-server` + filesystem + GitHub MCP servers |
+| **Skills system** | Reusable `*.skill.md` files with YAML front-matter |
+| **Specialist agents** | Coder, Researcher, Tester, DevOps, Accessibility |
+| **Reasoning** | ReAct, Plan-and-Execute, Tree-of-Thoughts frameworks |
+| **CI/CD** | GitHub Actions: agent task trigger, lint, test, nightly health check |
+| **Safety** | Path sandboxing, shell allowlist, secret scanning, thermal gating |
+
+### Quick Start
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Set env vars (copy and fill in)
+cp .env.template .env
+
+# 3. Run the test suite (agent tools + skills)
+python -m pytest tests/agent_tests/ -v
+
+# 4. Try an example
+python examples/use_file_ops.py
+python examples/invoke_skill.py skills/web-research.skill.md
+```
+
+### Invoking OmniAgent (GitHub Copilot)
+
+```
+# Simple task
+@OmniAgent fix the null-pointer in jacky_core.py line 42
+
+# Research
+@OmniAgent run skill: web-research query="best local LLM for coding 2025"
+
+# End-to-end feature
+@OmniAgent implement a /healthz endpoint, add a test, open a PR
+```
+
+### Available Agents
+
+| Agent | File | Role |
+|-------|------|------|
+| OmniAgent | `.github/agents/omniagent.agent.md` | Top-level orchestrator |
+| CoderAgent | `agents/coder.agent.md` | Code implementation & review |
+| ResearcherAgent | `agents/researcher.agent.md` | Web research & documentation |
+| TesterAgent | `agents/tester.agent.md` | Test writing & QA |
+| DevOpsAgent | `agents/devops.agent.md` | CI/CD, Docker, deployment |
+| AccessibilityAgent | `agents/accessibility.agent.md` | WCAG 2.1 AA audits |
+
+### Available Skills
+
+| Skill | File | Description |
+|-------|------|-------------|
+| web-research | `skills/web-research.skill.md` | Multi-source research → report |
+| code-refactor | `skills/code-refactor.skill.md` | Safe incremental refactoring |
+| add-feature | `skills/add-feature.skill.md` | Feature: design → code → PR |
+
+### MCP Server
+
+Configure in `mcp-servers/mcp-config.json`. Exposes:
+- `jacky_route_task` — route to cheapest capable model
+- `jacky_get_system_status` — GPU temp, CPU, RAM
+- `jacky_list_models` — available Ollama models
+
+See [docs/omniagent-architecture.md](docs/omniagent-architecture.md) for the
+full architecture diagram and routing decision tree.

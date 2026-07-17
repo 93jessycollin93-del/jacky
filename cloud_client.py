@@ -39,10 +39,26 @@ except Exception as _e:  # pragma: no cover - fallback to standard verification
 
 # Provider presets: base_url + a sensible default model.
 PROVIDERS = {
-    "xai":    {"url": "https://api.x.ai/v1/chat/completions",            "model": "grok-beta"},
+    "xai":    {"url": "https://api.x.ai/v1/chat/completions",            "model": "grok-4"},
     "groq":   {"url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
     "gemini": {"url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "model": "gemini-2.0-flash"},
     "openrouter": {"url": "https://openrouter.ai/api/v1/chat/completions", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    # OpenAI-compatible inference providers — wired but inactive until a key
+    # is added to the vault (see secrets.env: <NAME>_API_KEY_1). All speak the
+    # standard /chat/completions shape, so the existing client handles them.
+    "deepinfra":  {"url": "https://api.deepinfra.com/v1/openai/chat/completions", "model": "meta-llama/Meta-Llama-3.1-70B-Instruct"},
+    "fireworks":  {"url": "https://api.fireworks.ai/inference/v1/chat/completions", "model": "accounts/fireworks/models/llama-v3p3-70b-instruct"},
+    "lambda":     {"url": "https://api.lambda.ai/v1/chat/completions", "model": "llama3.3-70b-instruct-fp8"},
+    # RunPod serverless is per-endpoint: replace <ENDPOINT_ID> with your vLLM
+    # endpoint id, then set the model to whatever that endpoint serves.
+    "runpod":     {"url": "https://api.runpod.ai/v2/<ENDPOINT_ID>/openai/v1/chat/completions", "model": "<your-deployed-model>"},
+    # New providers (Jun 2026 subscriptions).
+    # vertex_ai URL is built dynamically from VERTEX_AI_PROJECT_ID (see CloudClient.__init__).
+    "vertex_ai":  {"url": "https://us-central1-aiplatform.googleapis.com/v1/projects/{project_id}/locations/us-central1/endpoints/openapi/chat/completions", "model": "google/gemini-2.0-flash-001"},
+    # Emergent Standard Plan — 100 credits/month; OpenAI-compatible shape assumed.
+    "emergent":   {"url": "https://api.emergent.sh/v1/chat/completions", "model": "emergent-standard"},
+    # GitHub Copilot Pro — requires GITHUB_COPILOT_TOKEN with copilot scope.
+    "copilot":    {"url": "https://api.githubcopilot.com/chat/completions", "model": "gpt-4o"},
 }
 
 class CloudError(RuntimeError):
@@ -57,7 +73,13 @@ class CloudClient:
         if provider not in PROVIDERS:
             raise ValueError(f"Unknown provider '{provider}'. Known: {list(PROVIDERS)}")
         self.provider = provider
-        self.url = PROVIDERS[provider]["url"]
+        url_template = PROVIDERS[provider]["url"]
+        # vertex_ai needs the GCP project ID injected into the URL.
+        if provider == "vertex_ai":
+            import os
+            project_id = os.getenv("VERTEX_AI_PROJECT_ID", "YOUR_PROJECT_ID")
+            url_template = url_template.replace("{project_id}", project_id)
+        self.url = url_template
         self.model = model or PROVIDERS[provider]["model"]
         self.keys = [k for k in keys if k]
         self.timeout = timeout
@@ -87,6 +109,14 @@ class CloudClient:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {key}",
+                # Cloudflare's Browser Integrity Check (in front of Groq et al.)
+                # returns HTTP 403 "error code: 1010" when it sees urllib's
+                # default bot UA. A normal browser UA passes the check. This was
+                # the real cause of the "invalid key" 403s — not the keys.
+                "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                               "AppleWebKit/537.36 (KHTML, like Gecko) "
+                               "Chrome/126.0.0.0 Safari/537.36"),
+                "Accept": "application/json",
             },
         )
         with urllib.request.urlopen(req, timeout=timeout or self.timeout, context=_SSL_CTX) as resp:

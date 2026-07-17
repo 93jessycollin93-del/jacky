@@ -10,7 +10,11 @@ import sys
 import hmac
 import secrets as _secrets
 import logging
+import random
+import threading
+import time
 import psutil
+from collections import deque
 from pathlib import Path
 from functools import wraps
 from flask import (Flask, jsonify, request, send_file, session,
@@ -19,6 +23,46 @@ from flask_cors import CORS
 from datetime import datetime, timedelta
 
 log = logging.getLogger("JackyAPI")
+
+# Squad manager — loads bots/*.json at import time
+try:
+    from squad_manager import squad_manager
+    log.info("SquadManager loaded.")
+except Exception as _e:
+    squad_manager = None
+    log.warning(f"SquadManager unavailable: {_e}")
+
+# Knowledge Condenser suite — wrapped, never modified. Each import is isolated
+# so a failure in one condenser module can't take down the API or the others.
+try:
+    from bots.condenser_bot import compress as condenser_compress, CondenserBot, SPECIALIZATIONS as CONDENSER_SPECIALIZATIONS
+    _condenser_bot = CondenserBot()
+    log.info("CondenserBot loaded.")
+except Exception as _e:
+    condenser_compress = None
+    CONDENSER_SPECIALIZATIONS = {}
+    _condenser_bot = None
+    log.warning(f"CondenserBot unavailable: {_e}")
+
+try:
+    from condenser_benchmark import run_benchmark, FrequencyCondenser
+    log.info("condenser_benchmark loaded.")
+except Exception as _e:
+    run_benchmark = None
+    FrequencyCondenser = None
+    log.warning(f"condenser_benchmark unavailable: {_e}")
+
+try:
+    from condenser_adversary import single_action_impacts, greedy_attack, attack_to_probs, failure_of, ACTIONS, N_ACTIONS
+    log.info("condenser_adversary loaded.")
+except Exception as _e:
+    single_action_impacts = None
+    greedy_attack = None
+    attack_to_probs = None
+    failure_of = None
+    ACTIONS = []
+    N_ACTIONS = 0
+    log.warning(f"condenser_adversary unavailable: {_e}")
 
 JACKY_HOME = Path(__file__).parent
 SAS_UI_PATH = JACKY_HOME / "sas_ui"
@@ -30,7 +74,9 @@ for p in (str(JACKY_HOME), TOOLS_DIR):
         sys.path.insert(0, p)
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
+# Restrict CORS to trusted origins only
+TRUSTED_ORIGINS = os.getenv("SAS_TRUSTED_ORIGINS", "http://localhost:5000,http://127.0.0.1:5000").split(",")
+CORS(app, supports_credentials=True, origins=TRUSTED_ORIGINS)
 
 # ----------------------------------------------------------------------------
 # AUTH — protects SAS when it's exposed to the internet (Cloudflare Tunnel).
@@ -47,11 +93,27 @@ except Exception:
 SAS_ACCESS_TOKEN = get_secret("SAS_ACCESS_TOKEN") or ""
 REQUIRE_AUTH = bool(SAS_ACCESS_TOKEN.strip())
 
+# Fail fast if exposed to internet without auth
+SAS_HOST = os.getenv("SAS_HOST", "127.0.0.1")
+if not REQUIRE_AUTH and SAS_HOST not in ("127.0.0.1", "localhost", "::1"):
+    log.critical("FATAL: SAS_ACCESS_TOKEN is missing, but app is bound to a public interface "
+                 f"({SAS_HOST}). Refusing to start in open mode on public network. "
+                 "Set SAS_ACCESS_TOKEN in secrets/secrets.env or bind to 127.0.0.1.")
+    sys.exit(1)
+
 # Stable secret key so sessions survive restarts; falls back to random.
 app.secret_key = (get_secret("SAS_SECRET_KEY")
                   or os.getenv("SAS_SECRET_KEY")
                   or _secrets.token_hex(32))
-app.permanent_session_lifetime = timedelta(days=30)
+
+# Secure session cookies
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=24) # Reduced from 30 days
+)
+app.permanent_session_lifetime = timedelta(hours=24)
 
 # Paths reachable WITHOUT a session (login flow, health, PWA shell assets).
 _OPEN_PATHS = {
@@ -81,6 +143,38 @@ def _gate():
     if path.startswith("/api"):
         return jsonify({"error": "unauthorized", "login": "/login"}), 401
     return redirect("/login")
+
+
+# ----------------------------------------------------------------------------
+# RATE LIMITER — lightweight, dependency-free, in-process sliding window.
+# Used to gate compute-heavy / arbitrary-input endpoints (e.g. condenser
+# compression, benchmark, adversary simulation) against abuse/DoS, since
+# this app is internet-exposed via the Cloudflare Tunnel.
+# ----------------------------------------------------------------------------
+_rate_lock = threading.Lock()
+_rate_buckets = {}
+
+def rate_limit(max_calls=20, window_seconds=60):
+    """Decorator: caps calls per (client identity, endpoint) within a sliding window."""
+    def decorator(fn):
+        @wraps(fn)
+        def wrapped(*args, **kwargs):
+            ident = request.remote_addr or "anon"
+            key = (ident, fn.__name__)
+            now = datetime.utcnow().timestamp()
+            with _rate_lock:
+                bucket = _rate_buckets.setdefault(key, deque())
+                while bucket and now - bucket[0] > window_seconds:
+                    bucket.popleft()
+                if len(bucket) >= max_calls:
+                    retry_after = max(1, int(window_seconds - (now - bucket[0])))
+                    return jsonify({"error": "rate_limited",
+                                    "message": f"Too many requests. Retry in {retry_after}s.",
+                                    "retry_after": retry_after}), 429
+                bucket.append(now)
+            return fn(*args, **kwargs)
+        return wrapped
+    return decorator
 
 # ----------------------------------------------------------------------------
 # LIVE AI ENGINE — local-first. Built once at import; cloud stays OFF.
@@ -154,6 +248,44 @@ def init_engine():
 init_engine()
 _load_local_bots()
 
+# ----------------------------------------------------------------------------
+# RUNTIME CONTROLS — the master switches the SAS dashboard drives.
+#   active        : master on/off for the whole AI team. When False, /api/ask
+#                   refuses to run anything (the team is "stood down").
+#   thinking_mode : default depth for requests that don't specify one —
+#                   "fast" | "balanced" | "deep".
+# Persisted to config.json so the choice survives restarts.
+# ----------------------------------------------------------------------------
+VALID_MODES = ("fast", "balanced", "deep")
+RUNTIME = {"active": True, "thinking_mode": "balanced"}
+
+def _load_runtime():
+    try:
+        with open(JACKY_HOME / "config.json") as f:
+            cfg = json.load(f)
+        rc = cfg.get("runtime_controls", {})
+        if isinstance(rc.get("active"), bool):
+            RUNTIME["active"] = rc["active"]
+        if rc.get("thinking_mode") in VALID_MODES:
+            RUNTIME["thinking_mode"] = rc["thinking_mode"]
+    except Exception:
+        pass
+
+def _save_runtime():
+    try:
+        path = JACKY_HOME / "config.json"
+        cfg = {}
+        if path.exists():
+            with open(path) as f:
+                cfg = json.load(f)
+        cfg["runtime_controls"] = dict(RUNTIME)
+        with open(path, "w") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception as e:
+        log.warning(f"could not persist runtime controls: {e}")
+
+_load_runtime()
+
 # Expected models from the download queue (for online/downloading display).
 EXPECTED_MODELS = [
     "qwen2.5-coder:14b", "whiterabbitneo", "gpt-oss:20b",
@@ -199,6 +331,16 @@ def dashboard():
         return send_file(str(dashboard_file))
     else:
         return {"error": "Dashboard not found"}, 404
+
+
+@app.route('/chat', methods=['GET'])
+def chat_page():
+    """Cursor-style multi-agent chat UI."""
+    chat_file = SAS_UI_PATH / "chat.html"
+    if chat_file.exists():
+        return send_file(str(chat_file))
+    return jsonify({"error": "Chat UI not found"}), 404
+
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -247,18 +389,45 @@ placeholder="paste your token" inputmode=text>
 </form></body></html>"""
 
 
+import time as _time
+
+# Basic rate limiting for login
+_login_attempts = {}
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """Token login. GET shows the form; POST validates and starts a session."""
     if not REQUIRE_AUTH:
         return redirect("/dashboard")
+        
+    client_ip = request.remote_addr
+    now = _time.time()
+    
+    # Clean up old attempts
+    for ip in list(_login_attempts.keys()):
+        if now - _login_attempts[ip]['time'] > 300: # 5 min
+            del _login_attempts[ip]
+            
+    if client_ip in _login_attempts and _login_attempts[client_ip]['count'] >= 5:
+        if now - _login_attempts[client_ip]['time'] < 60: # 1 min lockout
+            return "Too many attempts, try again later.", 429
+            
     error = False
     if request.method == 'POST':
         supplied = (request.form.get("token") or "").strip()
         if hmac.compare_digest(supplied, SAS_ACCESS_TOKEN):
             session.permanent = True
             session["authed"] = True
+            if client_ip in _login_attempts:
+                del _login_attempts[client_ip]
             return redirect("/dashboard")
+        
+        # Track failed attempt
+        if client_ip not in _login_attempts:
+            _login_attempts[client_ip] = {'count': 0, 'time': now}
+        _login_attempts[client_ip]['count'] += 1
+        _login_attempts[client_ip]['time'] = now
+        
         error = True
     return render_template_string(_LOGIN_HTML, error=error), (401 if error else 200)
 
@@ -483,27 +652,313 @@ def _try_cloud(prompt, chain):
     return None
 
 
+def _build_agent_roster() -> list:
+    """Unified list of selectable AIs for the chat UI."""
+    agents = [{
+        "id": "auto",
+        "name": "Auto (Jacky Router)",
+        "type": "router",
+        "cost": "free",
+        "available": True,
+        "description": "Local-first routing with thermal safety",
+    }]
+    specialties = {}
+    if ensemble:
+        try:
+            specialties = {mid: m.get("specialty", "")
+                           for mid, m in ensemble.get_ensemble_status()["models"].items()}
+        except Exception:
+            pass
+    if ollama_client:
+        try:
+            for m in ollama_client.list_models():
+                name = m["name"]
+                agents.append({
+                    "id": f"local:{name}",
+                    "name": name,
+                    "type": "local",
+                    "cost": "free",
+                    "available": True,
+                    "specialty": specialties.get(name, ""),
+                    "size_gb": m.get("size_gb"),
+                })
+        except Exception as e:
+            log.warning(f"agent roster local models failed: {e}")
+    if cloud_router:
+        for info in cloud_router.available():
+            provider = info["provider"]
+            agents.append({
+                "id": f"cloud:{provider}",
+                "name": provider.title(),
+                "type": "cloud",
+                "cost": "free",
+                "available": bool(info.get("has_keys")),
+                "description": f"Free cloud tier ({provider})",
+            })
+    if bot_router:
+        try:
+            for key, info in bot_router.get_status().get("bots", {}).items():
+                agents.append({
+                    "id": f"bot:{key}",
+                    "name": info.get("name", key),
+                    "type": "bot",
+                    "cost": info.get("cost", "unknown"),
+                    "available": True,
+                    "model": info.get("model"),
+                    "provider": info.get("provider"),
+                })
+        except Exception as e:
+            log.warning(f"agent roster bots failed: {e}")
+    return agents
+
+
+def _chat_messages_for_api(messages: list) -> list:
+    """Normalize chat history to role/content pairs Ollama accepts."""
+    out = []
+    for m in messages or []:
+        role = (m.get("role") or "user").lower()
+        if role not in ("user", "assistant", "system"):
+            continue
+        content = (m.get("content") or "").strip()
+        if content:
+            out.append({"role": role, "content": content})
+    return out
+
+
+def _last_user_text(messages: list) -> str:
+    for m in reversed(messages or []):
+        if (m.get("role") or "").lower() == "user":
+            return (m.get("content") or "").strip()
+    return ""
+
+
+def _cloud_chat(provider: str, messages: list) -> dict:
+    """Run a cloud provider with full message history."""
+    import time
+    from cloud_client import CloudClient, CloudError
+    from secrets_loader import get_keys
+    from cloud_router import PROVIDER_KEYS
+
+    keys = get_keys(PROVIDER_KEYS.get(provider, []))
+    if not keys:
+        return {"agent_id": f"cloud:{provider}", "status": "error",
+                "response": f"No API keys for {provider}"}
+    client = CloudClient(provider, keys)
+    start = time.time()
+    try:
+        # Build multi-turn prompt for providers that only get a single user turn.
+        lines = []
+        for m in _chat_messages_for_api(messages):
+            prefix = m["role"].capitalize()
+            lines.append(f"{prefix}: {m['content']}")
+        prompt = "\n\n".join(lines) if lines else ""
+        if not prompt:
+            return {"agent_id": f"cloud:{provider}", "status": "error",
+                    "response": "No messages to send"}
+        text = client.generate(prompt)
+        return {
+            "agent_id": f"cloud:{provider}",
+            "agent_name": provider.title(),
+            "engine": "cloud",
+            "provider": provider,
+            "model": client.model,
+            "status": "ok",
+            "response": text,
+            "latency_s": round(time.time() - start, 2),
+        }
+    except CloudError as e:
+        return {
+            "agent_id": f"cloud:{provider}",
+            "status": "error",
+            "response": str(e),
+            "latency_s": round(time.time() - start, 2),
+        }
+
+
+def _chat_with_agent(agent_id: str, messages: list, mode: str) -> dict:
+    """Send conversation history to one specific agent."""
+    import time
+    agent_id = (agent_id or "auto").strip()
+    msgs = _chat_messages_for_api(messages)
+    if not msgs:
+        return {"agent_id": agent_id, "status": "error", "response": "No messages"}
+
+    if agent_id == "auto":
+        prompt = _last_user_text(msgs)
+        data, _code = _run_ask(prompt, "general", mode)
+        return {
+            "agent_id": "auto",
+            "agent_name": "Auto (Jacky Router)",
+            "engine": data.get("engine", "unknown"),
+            "model": data.get("model"),
+            "provider": data.get("provider"),
+            "status": data.get("status", "error"),
+            "response": data.get("response", ""),
+            "why": data.get("why"),
+            "latency_s": data.get("latency_s"),
+            "fallback_chain": data.get("fallback_chain"),
+        }
+
+    if agent_id.startswith("local:"):
+        model = agent_id[6:]
+        if not ollama_client:
+            return {"agent_id": agent_id, "status": "error", "response": "Ollama unavailable"}
+        start = time.time()
+        try:
+            text = ollama_client.chat(model, msgs)
+            return {
+                "agent_id": agent_id,
+                "agent_name": model,
+                "engine": "local",
+                "model": model,
+                "status": "ok",
+                "response": text,
+                "latency_s": round(time.time() - start, 2),
+            }
+        except Exception as e:
+            return {
+                "agent_id": agent_id,
+                "status": "error",
+                "response": str(e),
+                "latency_s": round(time.time() - start, 2),
+            }
+
+    if agent_id.startswith("cloud:"):
+        provider = agent_id[6:]
+        return _cloud_chat(provider, msgs)
+
+    if agent_id.startswith("bot:"):
+        key = agent_id[4:]
+        prompt = _last_user_text(msgs)
+        if bot_router:
+            try:
+                target = bot_router.route(key, priority="normal")
+            except Exception:
+                target = key
+        else:
+            target = key
+        if target == "ollama_local" and ensemble:
+            result = ensemble.query_best(prompt, "general", respect_thermal=True, mode=mode)
+            return {
+                "agent_id": agent_id,
+                "agent_name": key,
+                "engine": "local",
+                "model": result.get("model"),
+                "status": result.get("status", "error"),
+                "response": result.get("response", ""),
+                "latency_s": result.get("latency_s"),
+            }
+        cloud = _try_cloud(prompt, [])
+        if cloud:
+            cloud["agent_id"] = agent_id
+            cloud["agent_name"] = key
+            return cloud
+        return {"agent_id": agent_id, "status": "error", "response": "Bot route failed"}
+
+    return {"agent_id": agent_id, "status": "error", "response": f"Unknown agent: {agent_id}"}
+
+
+@app.route('/api/agents', methods=['GET'])
+def api_agents():
+    """All AIs the chat UI can pick or add to a conversation."""
+    return jsonify({
+        "agents": _build_agent_roster(),
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
+@app.route('/api/chat', methods=['POST'])
+def api_chat():
+    """Multi-turn chat with explicit agent selection or multi-agent replies.
+
+    Body:
+      messages: [{role, content}, ...]
+      agent_id: "auto" | "local:model" | "cloud:groq" | "bot:jacky"  (active agent)
+      agents:   optional list — when len>1, every agent replies to the last turn
+      mode:     fast | balanced | deep
+    """
+    if not RUNTIME["active"]:
+        return jsonify({
+            "status": "paused",
+            "response": "AI team is PAUSED. Resume from the dashboard or chat header.",
+        }), 200
+
+    data = request.get_json(silent=True) or {}
+    messages = data.get("messages") or []
+    mode = (data.get("mode") or RUNTIME["thinking_mode"]).lower()
+    if mode not in VALID_MODES:
+        mode = RUNTIME["thinking_mode"]
+
+    multi = data.get("agents") or []
+    if len(multi) > 1:
+        results = [_chat_with_agent(aid, messages, mode) for aid in multi]
+        ok = any(r.get("status") == "ok" for r in results)
+        return jsonify({
+            "status": "ok" if ok else "error",
+            "multi": True,
+            "responses": results,
+            "timestamp": datetime.now().isoformat(),
+        })
+
+    agent_id = data.get("agent_id") or (multi[0] if multi else "auto")
+    result = _chat_with_agent(agent_id, messages, mode)
+    result["timestamp"] = datetime.now().isoformat()
+    status_code = 200 if result.get("status") in ("ok", "paused") else 503
+    return jsonify(result), status_code
+
+
+@app.route('/api/control', methods=['GET', 'POST'])
+def api_control():
+    """Read or set the master runtime controls (active switch + thinking mode).
+
+    GET  -> {"active": bool, "thinking_mode": "fast|balanced|deep"}
+    POST -> body may include {"active": bool} and/or {"thinking_mode": "..."}.
+            Returns the updated state. Persists to config.json.
+    """
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        if isinstance(data.get("active"), bool):
+            RUNTIME["active"] = data["active"]
+        mode = (data.get("thinking_mode") or "").lower()
+        if mode in VALID_MODES:
+            RUNTIME["thinking_mode"] = mode
+        _save_runtime()
+        log.info(f"Runtime controls updated: {RUNTIME}")
+    return jsonify({**RUNTIME, "valid_modes": list(VALID_MODES),
+                    "timestamp": datetime.now().isoformat()})
+
+
 @app.route('/api/ask', methods=['POST'])
 def api_ask():
-    """Ask the AI with situation-aware routing and an explicit fallback chain.
-
-    Body: {"prompt": "...", "task_type": "general"|"code"|"security"|...}
-
-    Fallback chain: local -> cloud (free tier) -> forced local -> error.
-    A live situation assessment gates whether local runs at all: if the GPU is
-    too hot/loaded, we skip straight to the free cloud tier instead of cooking
-    the card. The response reports the assessment, the chosen model, *why*, and
-    every step the request walked through.
-    """
+    """Ask the AI with situation-aware routing and an explicit fallback chain."""
     data = request.get_json(silent=True) or {}
     prompt = (data.get("prompt") or "").strip()
     task_type = (data.get("task_type") or "general").strip()
     if not prompt:
         return jsonify({"error": "prompt is required"}), 400
 
+    if not RUNTIME["active"]:
+        return jsonify({
+            "status": "paused",
+            "engine": "none",
+            "response": "🛑 AI team is PAUSED. Flip the Active switch in the SAS "
+                        "Power Panel to resume.",
+            "active": False,
+            "fallback_chain": [{"step": "master_switch", "status": "paused"}],
+        }), 200
+
+    mode = (data.get("mode") or data.get("thinking_mode") or "").lower()
+    if mode not in VALID_MODES:
+        mode = RUNTIME["thinking_mode"]
+
+    result, code = _run_ask(prompt, task_type, mode)
+    return jsonify(result), code
+
+
+def _run_ask(prompt: str, task_type: str, mode: str):
+    """Core ask logic — returns (response_dict, http_status)."""
     chain = []
 
-    # Live situation assessment (thermal/load/VRAM verdict).
     assessment = {}
     if assessor:
         try:
@@ -511,7 +966,6 @@ def api_ask():
         except Exception as e:
             log.warning(f"assessment error: {e}")
 
-    # Task-complexity routing (economy brain): local vs a named cloud bot.
     target = "ollama_local"
     if bot_router:
         try:
@@ -522,23 +976,23 @@ def api_ask():
     safe_local = assessment.get("safe_to_run_local", True)
     complexity_escalates = target != "ollama_local"
 
-    # ---- Step 1: local (only if thermally safe AND task doesn't demand cloud) ----
     if ensemble and safe_local and not complexity_escalates:
-        result = ensemble.query_best(prompt, task_type, respect_thermal=True)
+        result = ensemble.query_best(prompt, task_type, respect_thermal=True, mode=mode)
         if result.get("status") == "ok":
             chain.append({"step": "local", "status": "ok", "model": result.get("model")})
-            return jsonify({
+            return ({
                 "route": "ollama_local",
                 "engine": "local",
                 "model": result.get("model"),
                 "specialty": result.get("specialty"),
                 "status": "ok",
+                "thinking_mode": mode,
                 "latency_s": result.get("latency_s"),
                 "response": result.get("response"),
                 "why": result.get("assessment", {}).get("reason", "GPU healthy — ran local."),
                 "assessment": assessment,
                 "fallback_chain": chain,
-            })
+            }, 200)
         if result.get("status") == "escalate":
             chain.append({"step": "local", "status": "escalate",
                           "detail": result.get("reason")})
@@ -551,7 +1005,6 @@ def api_ask():
                assessment.get("reason", "local unsafe"))
         chain.append({"step": "local", "status": "skipped", "detail": why})
 
-    # ---- Step 2: free cloud escalation tier ----
     cloud_result = _try_cloud(prompt, chain)
     if cloud_result:
         cloud_result.update({
@@ -561,38 +1014,37 @@ def api_ask():
             "assessment": assessment,
             "fallback_chain": chain,
         })
-        return jsonify(cloud_result)
+        return (cloud_result, 200)
 
-    # ---- Step 3: forced local (last resort — better a warm GPU than nothing) ----
     if ensemble:
-        result = ensemble.query_best(prompt, task_type, respect_thermal=False)
+        result = ensemble.query_best(prompt, task_type, respect_thermal=False, mode=mode)
         if result.get("status") == "ok":
             chain.append({"step": "forced_local", "status": "ok",
                           "model": result.get("model")})
-            return jsonify({
+            return ({
                 "route": "ollama_local (forced fallback)",
                 "engine": "local",
                 "model": result.get("model"),
                 "specialty": result.get("specialty"),
+                "thinking_mode": mode,
                 "status": "ok",
                 "latency_s": result.get("latency_s"),
                 "response": result.get("response"),
                 "why": "Cloud unavailable; ran local as last resort despite thermal state.",
                 "assessment": assessment,
                 "fallback_chain": chain,
-            })
+            }, 200)
         chain.append({"step": "forced_local", "status": "error",
                       "detail": result.get("response") or result.get("error")})
 
-    # ---- Step 4: error with explanation ----
-    return jsonify({
+    return ({
         "status": "error",
         "engine": "none",
         "response": "All routes failed: local was unsafe/unavailable and the free "
                     "cloud tier could not answer. See fallback_chain for details.",
         "assessment": assessment,
         "fallback_chain": chain,
-    }), 503
+    }, 503)
 
 @app.route('/api/task', methods=['POST'])
 def api_submit_task():
@@ -713,6 +1165,691 @@ def api_metrics():
         "error": "monitor_bot unavailable",
         "timestamp": datetime.now().isoformat()
     })
+
+# ============================================================================
+# HUB PAGE
+# ============================================================================
+
+@app.route('/hub', methods=['GET'])
+def hub():
+    """Three-panel command center: squad roster | chat | SAS stats."""
+    hub_file = SAS_UI_PATH / "hub.html"
+    if hub_file.exists():
+        return send_file(str(hub_file))
+    return jsonify({"error": "Hub UI not found — build hub.html first"}), 404
+
+# ============================================================================
+# CONDENSER SUITE
+# Wraps bots/condenser_bot.py, condenser_benchmark.py and condenser_adversary.py
+# as pages + JSON APIs, without changing a single line of their logic. Every
+# route here is already covered by the global auth gate (_gate, above) since
+# none of these paths appear in _OPEN_PATHS. Compute-heavy / arbitrary-input
+# endpoints are additionally rate-limited and size-capped against abuse.
+# ============================================================================
+
+CONDENSER_MAX_INPUT_CHARS = 20000  # hard cap on text submitted for compression
+
+
+@app.route('/condenser', methods=['GET'])
+def condenser_page():
+    """Condenser Bot console — live compression of knowledge signals."""
+    f = SAS_UI_PATH / "condenser.html"
+    if f.exists():
+        return send_file(str(f))
+    return jsonify({"error": "Condenser UI not found"}), 404
+
+
+@app.route('/condenser/benchmark', methods=['GET'])
+def condenser_benchmark_page():
+    """Condenser Benchmark scorecard (graph reconstruction, invariants, etc.)."""
+    f = SAS_UI_PATH / "condenser_benchmark.html"
+    if f.exists():
+        return send_file(str(f))
+    return jsonify({"error": "Condenser benchmark UI not found"}), 404
+
+
+@app.route('/condenser/adversary', methods=['GET'])
+def condenser_adversary_page():
+    """Adversarial co-evolution — brittleness map + learned-attack results."""
+    f = SAS_UI_PATH / "condenser_adversary.html"
+    if f.exists():
+        return send_file(str(f))
+    return jsonify({"error": "Condenser adversary UI not found"}), 404
+
+
+@app.route('/api/condenser/specializations', methods=['GET'])
+def api_condenser_specializations():
+    """Available condenser specializations (density + symbolic tag)."""
+    if not condenser_compress:
+        return jsonify({"error": "condenser bot unavailable"}), 503
+    return jsonify({"specializations": CONDENSER_SPECIALIZATIONS})
+
+
+@app.route('/api/condenser/compress', methods=['POST'])
+@rate_limit(max_calls=20, window_seconds=60)
+def api_condenser_compress():
+    """Run the live knowledge condenser on submitted text (bots/condenser_bot.py)."""
+    if not condenser_compress or not _condenser_bot:
+        return jsonify({"error": "condenser bot unavailable"}), 503
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        return jsonify({"error": "text is required"}), 400
+    if len(text) > CONDENSER_MAX_INPUT_CHARS:
+        return jsonify({"error": f"text exceeds {CONDENSER_MAX_INPUT_CHARS} character limit"}), 413
+    specialization = data.get("specialization", "baseline")
+    if specialization not in CONDENSER_SPECIALIZATIONS:
+        specialization = "baseline"
+    try:
+        density = int(data.get("density", 0))
+    except (TypeError, ValueError):
+        density = 0
+    density = max(0, min(100, density))
+    save = bool(data.get("save", True))
+    try:
+        result = condenser_compress(text, density, specialization)
+        if save:
+            result["star_id"] = _condenser_bot.save_star(result, text)
+        return jsonify(result)
+    except Exception as e:
+        log.exception("condenser compress failed")
+        return jsonify({"error": "compression failed"}), 500
+
+
+@app.route('/api/condenser/stars', methods=['GET'])
+@rate_limit(max_calls=60, window_seconds=60)
+def api_condenser_stars():
+    """List previously saved condenser 'stars' from data/condensers.db."""
+    if not _condenser_bot:
+        return jsonify({"error": "condenser bot unavailable"}), 503
+    specialization = request.args.get("specialization") or None
+    if specialization and specialization not in CONDENSER_SPECIALIZATIONS:
+        return jsonify({"error": "unknown specialization"}), 400
+    try:
+        limit = max(1, min(100, int(request.args.get("limit", 20))))
+    except ValueError:
+        limit = 20
+    try:
+        return jsonify({"stars": _condenser_bot.list_stars(specialization, limit)})
+    except Exception:
+        log.exception("condenser list_stars failed")
+        return jsonify({"error": "could not list stars"}), 500
+
+
+@app.route('/api/condenser/benchmark', methods=['GET'])
+@rate_limit(max_calls=10, window_seconds=60)
+def api_condenser_benchmark():
+    """Run condenser_benchmark.run_benchmark() with bounded, safe parameters."""
+    if not run_benchmark:
+        return jsonify({"error": "condenser benchmark unavailable"}), 503
+    try:
+        samples = max(20, min(300, int(request.args.get("samples", 200))))
+    except ValueError:
+        samples = 200
+    try:
+        seed = int(request.args.get("seed", 0)) & 0xFFFFFFFF
+    except ValueError:
+        seed = 0
+    try:
+        results = run_benchmark(FrequencyCondenser, n_samples=samples, seed=seed)
+        # JSON object keys must be strings; per_noise is keyed by float noise levels.
+        results["per_noise"] = {str(k): v for k, v in results["per_noise"].items()}
+        return jsonify(results)
+    except Exception:
+        log.exception("condenser benchmark failed")
+        return jsonify({"error": "benchmark run failed"}), 500
+
+
+@app.route('/api/condenser/adversary', methods=['GET'])
+@rate_limit(max_calls=5, window_seconds=60)
+def api_condenser_adversary():
+    """Run the adversarial co-evolution layer with bounded, safe parameters."""
+    if not single_action_impacts:
+        return jsonify({"error": "condenser adversary unavailable"}), 503
+    try:
+        budget = max(1, min(5, int(request.args.get("budget", 3))))
+    except ValueError:
+        budget = 3
+    try:
+        keep = max(0.05, min(0.9, float(request.args.get("keep", 0.30))))
+    except ValueError:
+        keep = 0.30
+    kw = dict(keep=keep)
+    try:
+        base, rows = single_action_impacts(**kw)
+        chosen, learned_fail, gains = greedy_attack(budget=budget, **kw)
+        _, learned_ef, learned_iv = failure_of(chosen, **kw)
+        attack_names = [f"{ACTIONS[i][0]} {ACTIONS[i][1][0]}->{ACTIONS[i][1][1]}" for i in chosen]
+        rand_fs = []
+        rng = random.Random(7)
+        for _ in range(10):
+            rc = rng.sample(range(N_ACTIONS), len(chosen)) if chosen else []
+            rand_fs.append(failure_of(rc, **kw)[0])
+        rand_fail = (sum(rand_fs) / len(rand_fs)) if rand_fs else 0.0
+        return jsonify({
+            "no_attack_failure": round(base, 3),
+            "brittleness_map": [
+                {"kind": r["kind"], "edge": f"{r['edge'][0]}->{r['edge'][1]}",
+                 "impact": round(r["impact"], 3)} for r in rows
+            ],
+            "greedy_attack": attack_names,
+            "marginal_gains": [round(g, 3) for g in gains],
+            "learned_failure": round(learned_fail, 3),
+            "random_failure": round(rand_fail, 3),
+            "learning_advantage": round(learned_fail - rand_fail, 3),
+        })
+    except Exception:
+        log.exception("condenser adversary failed")
+        return jsonify({"error": "adversary run failed"}), 500
+
+# ============================================================================
+# SQUAD API
+# ============================================================================
+
+@app.route('/api/squads', methods=['GET'])
+def api_squads():
+    """Return all squads and their bot rosters."""
+    if not squad_manager:
+        return jsonify({"error": "SquadManager unavailable"}), 503
+    return jsonify({
+        "squads": squad_manager.all_squads(),
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
+@app.route('/api/squads/bots', methods=['GET'])
+def api_squads_bots():
+    """Flat list of all bots across all squads."""
+    if not squad_manager:
+        return jsonify({"error": "SquadManager unavailable"}), 503
+    return jsonify({
+        "bots": squad_manager.all_bots(),
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
+@app.route('/api/squads/<squad>/ask', methods=['POST'])
+def api_squad_ask(squad: str):
+    """Route to the squad's lead bot only (single response with memory)."""
+    if not RUNTIME["active"]:
+        return jsonify({"status": "paused",
+                        "response": "AI team is PAUSED."}), 200
+    if not squad_manager:
+        return jsonify({"error": "SquadManager unavailable"}), 503
+
+    data = request.get_json(silent=True) or {}
+    messages = data.get("messages") or []
+    mode = (data.get("mode") or RUNTIME["thinking_mode"]).lower()
+    if mode not in VALID_MODES:
+        mode = RUNTIME["thinking_mode"]
+
+    lead = squad_manager.get_lead(squad)
+    if not lead:
+        return jsonify({"error": f"Unknown squad: {squad}"}), 404
+
+    # Build the user prompt for memory retrieval
+    user_prompt = ""
+    for m in reversed(messages):
+        if (m.get("role") or "").lower() == "user":
+            user_prompt = (m.get("content") or "").strip()
+            break
+
+    # Inject memory + personality into messages as system prefix
+    system_text = squad_manager.build_system_prompt(lead, user_prompt)
+    augmented = [{"role": "system", "content": system_text}] + list(messages)
+
+    result = _chat_with_agent(lead.model_preference or "auto", augmented, mode)
+    result.update({
+        "bot_id":   lead.id,
+        "bot_name": lead.name,
+        "squad":    squad,
+        "memory_injected": lead.memory_enabled,
+        "timestamp": datetime.now().isoformat(),
+    })
+    status_code = 200 if result.get("status") in ("ok", "paused") else 503
+    return jsonify(result), status_code
+
+
+@app.route('/api/squads/<squad>/discuss', methods=['POST'])
+def api_squad_discuss(squad: str):
+    """All squad members reply to the last user message (multi-agent mode)."""
+    if not RUNTIME["active"]:
+        return jsonify({"status": "paused",
+                        "response": "AI team is PAUSED."}), 200
+    if not squad_manager:
+        return jsonify({"error": "SquadManager unavailable"}), 503
+
+    data = request.get_json(silent=True) or {}
+    messages = data.get("messages") or []
+    mode = (data.get("mode") or RUNTIME["thinking_mode"]).lower()
+    if mode not in VALID_MODES:
+        mode = RUNTIME["thinking_mode"]
+
+    bots = squad_manager.get_squad(squad)
+    if not bots:
+        return jsonify({"error": f"Unknown or empty squad: {squad}"}), 404
+
+    user_prompt = ""
+    for m in reversed(messages):
+        if (m.get("role") or "").lower() == "user":
+            user_prompt = (m.get("content") or "").strip()
+            break
+
+    responses = []
+    for bot in bots:
+        if not bot.active:
+            continue
+        system_text = squad_manager.build_system_prompt(bot, user_prompt)
+        augmented = [{"role": "system", "content": system_text}] + list(messages)
+        result = _chat_with_agent(bot.model_preference or "auto", augmented, mode)
+        result.update({
+            "bot_id":   bot.id,
+            "bot_name": bot.name,
+            "color":    bot.color,
+        })
+        responses.append(result)
+
+    ok = any(r.get("status") == "ok" for r in responses)
+    return jsonify({
+        "status":    "ok" if ok else "error",
+        "multi":     True,
+        "squad":     squad,
+        "responses": responses,
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
+@app.route('/api/squads/reload', methods=['POST'])
+def api_squads_reload():
+    """Hot-reload bot configs from bots/*.json without restarting."""
+    if not squad_manager:
+        return jsonify({"error": "SquadManager unavailable"}), 503
+    squad_manager.reload()
+    return jsonify({"status": "reloaded",
+                    "bots": len(squad_manager.all_bots()),
+                    "timestamp": datetime.now().isoformat()})
+
+# ============================================================================
+# SHELL API — whitelisted PowerShell execution
+# ============================================================================
+
+import subprocess, re as _re, shlex as _shlex
+
+_SHELL_WHITELIST = [
+    r"^Get-",
+    r"^ls\b", r"^dir\b", r"^cat\b",
+    r"^ollama\b",
+    r"^git (status|log|diff|branch|show)\b",
+    r"^nvidia-smi\b",
+    r"^netstat\b", r"^ipconfig\b",
+    r"^tasklist\b", r"^Get-Process\b",
+    r"^echo\b", r"^Write-Host\b",
+    r"^Select-Object\b", r"^Where-Object\b", r"^Sort-Object\b",
+    r"^Get-Content\b", r"^Test-Path\b", r"^Resolve-Path\b",
+]
+
+_SHELL_BLOCK = [
+    r"Remove-Item", r"rm\b", r"del\b", r"rd\b",
+    r"format\b", r"reg\s+add", r"reg\s+delete",
+    r"netsh\s+(add|delete|set)",
+    r"Set-ExecutionPolicy",
+    r"Invoke-Expression", r"iex\b",
+    r"DownloadFile", r"WebClient",
+    r"Start-Process.*-Verb\s*RunAs",
+    r"shutdown", r"restart-computer",
+]
+
+def _shell_allowed(command: str) -> tuple[bool, str]:
+    cmd = command.strip()
+    for pattern in _SHELL_BLOCK:
+        if _re.search(pattern, cmd, _re.IGNORECASE):
+            return False, f"Blocked: matches deny-list pattern '{pattern}'"
+    for pattern in _SHELL_WHITELIST:
+        if _re.search(pattern, cmd, _re.IGNORECASE):
+            return True, "ok"
+    return False, "Not in allow-list. Add it to _SHELL_WHITELIST in jacky_api.py."
+
+
+@app.route('/api/shell', methods=['POST'])
+def api_shell():
+    """Execute a whitelisted PowerShell command and return output."""
+    if not REQUIRE_AUTH and not session.get("authed"):
+        pass  # Open SAS — allow
+    elif REQUIRE_AUTH and not session.get("authed"):
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    command = (data.get("command") or "").strip()
+    if not command:
+        return jsonify({"error": "command is required"}), 400
+
+    allowed, reason = _shell_allowed(command)
+    if not allowed:
+        return jsonify({
+            "status": "blocked",
+            "command": command,
+            "reason": reason,
+        }), 403
+
+    try:
+        result = subprocess.run(
+            ["powershell", "-NonInteractive", "-Command", command],
+            capture_output=True, text=True, timeout=30
+        )
+        return jsonify({
+            "status":    "ok",
+            "command":   command,
+            "stdout":    result.stdout[:8000],
+            "stderr":    result.stderr[:2000],
+            "exit_code": result.returncode,
+            "timestamp": datetime.now().isoformat(),
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"status": "error", "command": command,
+                        "error": "Command timed out (30s limit)"}), 408
+    except Exception as e:
+        return jsonify({"status": "error", "command": command,
+                        "error": str(e)}), 500
+
+# ============================================================================
+# SAS COMMS — Claude Code personality gating
+# ============================================================================
+
+@app.route('/api/sas-comms/activate', methods=['POST'])
+def sas_comms_activate():
+    """Activate SAS communications intelligence mode (enables Claude Code)."""
+    session["sas_comms"] = True
+    log.info("SAS comms mode activated for this session.")
+    return jsonify({"status": "active", "claude_code_enabled": True,
+                    "timestamp": datetime.now().isoformat()})
+
+
+@app.route('/api/sas-comms/status', methods=['GET'])
+def sas_comms_status():
+    return jsonify({
+        "active": bool(session.get("sas_comms")),
+        "timestamp": datetime.now().isoformat(),
+    })
+
+# ============================================================================
+# DATA COLLECTOR — background asset collection & refinement endpoints.
+# Wired in with a guard so a collector import error can't take down the API.
+# All /api/collector/* routes are protected by the global auth gate above.
+# ============================================================================
+try:
+    from data_collector import register_collector_routes
+    register_collector_routes(app)
+    log.info("Data collector routes registered (/api/collector/*).")
+except Exception as e:
+    log.warning(f"Data collector routes unavailable: {e}")
+
+# ============================================================================
+# ECPS MEMORY LAYER — Production Compression for Conversation History
+# ============================================================================
+memory_ecps = None
+try:
+    from jacky_memory_ecps import ECPSMemoryLayer
+    memory_ecps = ECPSMemoryLayer(db_path=str(JACKY_HOME / "data" / "jacky_memory_ecps.db"))
+    log.info("ECPS Memory Layer initialized (conversation history compression enabled).")
+except Exception as e:
+    log.warning(f"ECPS Memory Layer unavailable: {e}")
+
+# ============================================================================
+# ECPS API ENDPOINTS — Real-world compression demonstration
+# ============================================================================
+
+@app.route('/api/ecps/compress-conversation', methods=['POST'])
+def api_ecps_compress_conversation():
+    """Compress an entire conversation to a master seed.
+
+    Body:
+      conversation_id: unique identifier
+      messages: [{role, content}, ...]
+
+    Returns:
+      master_seed: 32-byte fingerprint representing entire conversation
+      original_size: bytes before compression
+      compressed_size: bytes after compression
+      compression_ratio: X times smaller
+      message_count: number of messages compressed
+    """
+    if not memory_ecps:
+        return jsonify({"error": "ECPS Memory Layer unavailable"}), 503
+
+    data = request.get_json(silent=True) or {}
+    conversation_id = (data.get("conversation_id") or f"conv_{int(time.time())}").strip()
+    messages = data.get("messages") or []
+
+    if not messages:
+        return jsonify({"error": "messages is required"}), 400
+
+    try:
+        result = memory_ecps.compress_conversation(conversation_id, messages)
+        return jsonify({
+            "status": "ok",
+            "conversation_id": result["conversation_id"],
+            "master_seed": result["master_seed"],
+            "original_size_bytes": result["original_size"],
+            "compressed_size_bytes": result["compressed_size"],
+            "compression_ratio": round(result["compression_ratio"], 1),
+            "message_count": result["message_count"],
+            "extra_capacity_estimate": round(result["extra_capacity_estimate"], 1),
+            "timestamp": datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        log.exception("ECPS compress_conversation failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/ecps/expand-seed', methods=['POST'])
+def api_ecps_expand_seed():
+    """Expand a compressed seed back to full conversation data.
+
+    Body:
+      seed: the master seed to expand
+
+    Returns:
+      conversation_data: full original data reconstructed from seed
+      verified: whether hash verification passed (lossless recovery)
+    """
+    if not memory_ecps:
+        return jsonify({"error": "ECPS Memory Layer unavailable"}), 503
+
+    data = request.get_json(silent=True) or {}
+    seed = (data.get("seed") or "").strip()
+
+    if not seed:
+        return jsonify({"error": "seed is required"}), 400
+
+    try:
+        result = memory_ecps.expand_seed(seed)
+        if result is None:
+            return jsonify({"error": f"Seed not found: {seed[:16]}..."}), 404
+
+        return jsonify({
+            "status": "ok",
+            "seed": seed[:16] + "...",
+            "conversation_data": result,
+            "timestamp": datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        log.exception("ECPS expand_seed failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/ecps/compress-interaction', methods=['POST'])
+def api_ecps_compress_interaction():
+    """Compress a single interaction (message) to a seed.
+
+    Body:
+      conversation_id: which conversation this belongs to
+      role: "user" or "assistant"
+      content: the message text
+
+    Returns:
+      seed: 32-byte fingerprint for this single message
+      compression_ratio: original bytes / seed bytes
+    """
+    if not memory_ecps:
+        return jsonify({"error": "ECPS Memory Layer unavailable"}), 503
+
+    data = request.get_json(silent=True) or {}
+    conversation_id = (data.get("conversation_id") or f"conv_{int(time.time())}").strip()
+    role = (data.get("role") or "user").strip().lower()
+    content = (data.get("content") or "").strip()
+
+    if not content:
+        return jsonify({"error": "content is required"}), 400
+    if role not in ("user", "assistant"):
+        return jsonify({"error": "role must be 'user' or 'assistant'"}), 400
+
+    try:
+        seed = memory_ecps.compress_interaction(conversation_id, role, content)
+        return jsonify({
+            "status": "ok",
+            "seed": seed,
+            "original_size_bytes": len(content.encode()),
+            "seed_bytes": 32,
+            "timestamp": datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        log.exception("ECPS compress_interaction failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/ecps/stats', methods=['GET'])
+def api_ecps_stats():
+    """Get ECPS compression statistics (total ratio, cache hit rate, etc.).
+
+    Returns:
+      overall_ratio: total compression ratio across all conversations
+      cache_hit_rate: percentage of expanded seeds from cache
+      total_original_bytes: cumulative original size
+      total_compressed_bytes: cumulative compressed size
+      seed_count: number of stored seeds
+    """
+    if not memory_ecps:
+        return jsonify({"error": "ECPS Memory Layer unavailable"}), 503
+
+    try:
+        stats = memory_ecps.get_compression_stats()
+        return jsonify({
+            "status": "ok",
+            "overall_compression_ratio": round(stats.get("overall_ratio", 1.0), 1),
+            "cache_hit_rate_percent": round(stats.get("cache_hit_rate", 0) * 100, 1),
+            "total_original_bytes": stats.get("total_original", 0),
+            "total_compressed_bytes": stats.get("total_compressed", 0),
+            "seed_count": stats.get("seed_count", 0),
+            "cache_hits": stats.get("cache_hits", 0),
+            "cache_misses": stats.get("cache_misses", 0),
+            "timestamp": datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        log.exception("ECPS stats failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/ecps/seeds', methods=['GET'])
+def api_ecps_seeds():
+    """List all stored seeds with their metadata (paginated).
+
+    Query params:
+      limit: max results (default 20)
+      offset: pagination offset (default 0)
+
+    Returns:
+      seeds: [{seed_id, conversation_id, compression_ratio, original_size, expanded_count}, ...]
+    """
+    if not memory_ecps:
+        return jsonify({"error": "ECPS Memory Layer unavailable"}), 503
+
+    try:
+        limit = max(1, min(100, int(request.args.get("limit", 20))))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        limit = 20
+        offset = 0
+
+    try:
+        all_seeds = memory_ecps.get_seeds_summary()
+        total = len(all_seeds)
+        seeds_page = all_seeds[offset:offset+limit]
+
+        return jsonify({
+            "status": "ok",
+            "seeds": seeds_page,
+            "total_seeds": total,
+            "limit": limit,
+            "offset": offset,
+            "timestamp": datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        log.exception("ECPS seeds failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/ecps/demo', methods=['POST'])
+def api_ecps_demo():
+    """Live demo: compress a test conversation and show the compression magic.
+
+    Body (optional):
+      message_count: how many messages to generate for demo (default 5)
+
+    Returns:
+      Full compression workflow with before/after stats
+    """
+    if not memory_ecps:
+        return jsonify({"error": "ECPS Memory Layer unavailable"}), 503
+
+    data = request.get_json(silent=True) or {}
+    try:
+        message_count = max(1, min(50, int(data.get("message_count", 5))))
+    except ValueError:
+        message_count = 5
+
+    try:
+        # Generate a test conversation
+        messages = []
+        demo_topics = [
+            "How do I optimize my GPU for deep learning?",
+            "What are the best practices for model fine-tuning?",
+            "Can you explain attention mechanisms?",
+            "How do I reduce model inference latency?",
+            "What's the difference between quantization and pruning?",
+        ]
+
+        for i in range(message_count):
+            topic = demo_topics[i % len(demo_topics)]
+            messages.append({
+                "role": "user",
+                "content": f"Message {i+1}: {topic} (expanded with more details...)"
+            })
+            messages.append({
+                "role": "assistant",
+                "content": f"Response {i+1}: Here's a detailed answer about {topic.lower()}. " * 3
+            })
+
+        # Compress
+        conv_id = f"demo_conv_{int(time.time() * 1000)}"
+        result = memory_ecps.compress_conversation(conv_id, messages)
+
+        return jsonify({
+            "status": "ok",
+            "demo_result": {
+                "conversation_id": conv_id,
+                "message_count": result["message_count"],
+                "original_size_kb": round(result["original_size"] / 1024, 2),
+                "compressed_size_bytes": result["compressed_size"],
+                "master_seed": result["master_seed"],
+                "compression_ratio": round(result["compression_ratio"], 1),
+                "extra_capacity_estimate": round(result["extra_capacity_estimate"], 1),
+            },
+            "message": f"✓ Compressed {result['message_count']} messages ({result['original_size']} bytes) → 32 byte seed ({result['compression_ratio']:.0f}x smaller)",
+            "timestamp": datetime.now().isoformat(),
+        }), 200
+    except Exception as e:
+        log.exception("ECPS demo failed")
+        return jsonify({"error": str(e)}), 500
 
 # ============================================================================
 # ERROR HANDLERS

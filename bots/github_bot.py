@@ -6,9 +6,17 @@ Reports back to Jacky.
 """
 
 import logging
+<<<<<<< HEAD
 import os
+=======
+import sys
+from pathlib import Path
+>>>>>>> origin/main
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from repo_mirror import get_local_repo_path, repo_status  # noqa: E402
 
 log = logging.getLogger("GitHubBot")
 
@@ -24,6 +32,16 @@ class GitHubBot:
         if self.token:
             self.headers["Authorization"] = f"token {self.token}"
         log.info(f"GitHub Bot ready (user: {self.username})")
+
+    def _repo_source(self, name: str) -> Dict[str, Any]:
+        """Prefer a local mirror (scripts/sync_repos.py) over a live GitHub
+        API call for read-only/status lookups. Falls back to "remote" when
+        no fresh local mirror is available."""
+        local_path = get_local_repo_path(name)
+        if local_path:
+            return {"source": "local_mirror", "path": str(local_path),
+                     "sync_status": repo_status(name)}
+        return {"source": "remote"}
 
     def handle_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """Process a GitHub-related task."""
@@ -60,6 +78,7 @@ class GitHubBot:
         return result
 
     def _get_repos_status(self) -> List[Dict[str, Any]]:
+<<<<<<< HEAD
         """Status of your repos (via API)."""
         import requests
         try:
@@ -87,6 +106,31 @@ class GitHubBot:
         except Exception as e:
             log.error(f"Failed to fetch repos: {e}")
             return []
+=======
+        """Status of all your repos.
+
+        Checks the local mirror (scripts/sync_repos.py) first; falls back
+        to the GitHub API (not yet implemented) when no mirror is present.
+        """
+        # Would call GitHub API
+        repos = [
+            {
+                "name": "cyber-store",
+                "branch": "main",
+                "last_commit": "2 hours ago",
+                "status": "✅ healthy"
+            },
+            {
+                "name": "eru",
+                "branch": "feature/jackie-animation-customization",
+                "last_commit": "10 min ago",
+                "status": "✅ healthy"
+            }
+        ]
+        for r in repos:
+            r.update(self._repo_source(r["name"]))
+        return repos
+>>>>>>> origin/main
 
     def _get_pending_prs(self) -> List[Dict[str, Any]]:
         """PRs awaiting review or action."""
