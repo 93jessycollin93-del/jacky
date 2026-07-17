@@ -49,6 +49,7 @@ that broke pip/winget). Pausing the VPN/AV makes it fast. User's call.
 | `pull_models.log` | Download progress log |
 | `TUNNEL_SETUP.md` | Quick + permanent tunnel setup |
 | `OPERATIONAL_GUIDE.md` | Daily routine, metrics, troubleshooting |
+| `WORKSTATION_SETUP.md` | VS Code + Claude Code, NIM proxy, hardware check, hourly auto-save |
 | `ARCHITECTURE.md` | Engine deep-dive |
 | `GITHUB_SETUP.md` | Push steps (username already filled in) |
 | `secrets\secrets.env` | Vault: SAS token, API keys (gitignored) |
