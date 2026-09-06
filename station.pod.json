@@ -1,0 +1,93 @@
+{
+  "$schema": "./superstation/spec/pod.manifest.schema.json",
+  "kernel": "1.0.0",
+  "pod": {
+    "id": "sas.pod.jacky",
+    "name": "Jacky Engine",
+    "role": "engine",
+    "repo": "93jessycollin93-del/jacky",
+    "summary": "Situation-aware orchestration engine. Owns the thermal verdict and the routing waterfall; the only pod in the fleet that measures anything real."
+  },
+  "provides": [
+    {
+      "id": "sas.telemetry.system",
+      "version": "1.0.0",
+      "title": "GPU/CPU/RAM readings",
+      "requires": ["sas.link.engine"]
+    },
+    {
+      "id": "sas.telemetry.assessment",
+      "version": "1.0.0",
+      "title": "Situation verdict — safe_for_local, escalate_to_free, and why",
+      "requires": ["sas.link.engine"],
+      "degradesTo": "sas.telemetry.system"
+    },
+    {
+      "id": "sas.link.engine",
+      "version": "1.0.0",
+      "title": "Reachability of the Flask engine itself",
+      "requires": []
+    },
+    {
+      "id": "sas.route.ask",
+      "version": "1.0.0",
+      "title": "Situation-aware inference — local Ollama, then the free cloud tier",
+      "requires": ["sas.link.engine"]
+    },
+    {
+      "id": "sas.route.models",
+      "version": "1.0.0",
+      "title": "Model inventory and per-model availability",
+      "requires": ["sas.link.engine"]
+    },
+    {
+      "id": "sas.bots.roster",
+      "version": "1.0.0",
+      "title": "Named cloud bots — jacky/Gemini, claude_jr/Haiku",
+      "requires": ["sas.link.engine"]
+    },
+    {
+      "id": "sas.squads.ask",
+      "version": "1.0.0",
+      "title": "Squad consoles — coding, security, archivist",
+      "requires": ["sas.route.ask"]
+    },
+    {
+      "id": "sas.condense.compress",
+      "version": "1.0.0",
+      "title": "ECPS / condenser compression pipeline",
+      "requires": ["sas.link.engine"]
+    },
+    {
+      "id": "sas.alerts.feed",
+      "version": "1.0.0",
+      "title": "Thermal and resource alerts",
+      "requires": ["sas.link.engine"]
+    },
+    {
+      "id": "sas.config.read",
+      "version": "1.0.0",
+      "title": "Read tunables from config.json",
+      "requires": ["sas.link.engine"]
+    },
+    {
+      "id": "sas.config.write",
+      "version": "1.0.0",
+      "title": "Write tunables",
+      "privileged": true,
+      "requires": ["sas.link.engine"]
+    },
+    {
+      "id": "sas.control.power",
+      "version": "1.0.0",
+      "title": "Engine master switch and power presets",
+      "privileged": true,
+      "requires": ["sas.link.engine"]
+    }
+  ],
+  "requires": [],
+  "surfaces": [
+    { "kind": "http", "base": "/api", "note": "Flask (jacky_api.py) behind waitress (serve.py)" },
+    { "kind": "static", "base": "/dashboard", "note": "SAS PWA — sas_ui/" }
+  ]
+}

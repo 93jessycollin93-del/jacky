@@ -21,6 +21,8 @@ Jacky is a situation-aware AI orchestration engine that:
 | `serve.py` | Production WSGI server (use this, not jacky_api.py, for internet) |
 | `jacky_api.py` | Flask API (dev mode) |
 | `config.json` | All tunables — thermal limits, resource caps, preferences |
+| `superstation/` | Fleet contract + kernel — see `superstation/README.md` |
+| `station.pod.json` | This pod's capability manifest |
 | `secrets/secrets.env` | API keys + SAS token (gitignored — never commit) |
 | `bots/monitor_bot.py` | System monitor bot |
 | `bots/github_bot.py` | GitHub automation bot |
@@ -55,6 +57,31 @@ SAS_ACCESS_TOKEN=      # SAS dashboard login token
 - **Codespace caveat**: Ollama runs on the physical PC, not here. In Codespace,
   point `OLLAMA_HOST=http://your-pc-ip:11434` if you want local model access,
   or the cloud router will handle all inference automatically.
+
+## The Superstation foundation
+
+`superstation/` is the contract the whole fleet shares — nine repos, four stacks,
+no common dependency. It is not a library to import so much as a set of rules
+with two reference implementations (TypeScript and Python) that are held in sync
+by one shared vector file.
+
+The load-bearing idea: **the engine is usually unreachable**, so every value that
+crosses a pod boundary carries a provenance block saying how real it is
+(`live > cached > degraded > simulated > absent`). A pod cannot emit a reading
+without answering that question, and `derive()` carries the weakest input
+fidelity into any value computed from it — so a chain of pods cannot launder a
+simulated number into a live one.
+
+```bash
+python3 superstation/conformance/test_conformance.py   # 71 cases, python kernel
+node    superstation/conformance/conformance.mjs       # same 71, typescript kernel
+python3 superstation/tools/station_doctor.py .         # validate station.pod.json
+python3 superstation/tools/station_sync.py --check-all ..   # vendored-copy drift
+```
+
+Read `superstation/SPEC.md` before changing anything under `superstation/` — it
+is normative, and the version compatibility rules in §5 are what let one repo
+upgrade without the other eight.
 
 ## What was last worked on (2026-06-28)
 

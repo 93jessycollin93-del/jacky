@@ -1,0 +1,236 @@
+{
+  "vectorsVersion": "1.0.0",
+  "kernel": "1.0.0",
+  "note": "Executed by BOTH kernel/py and kernel/ts. A change here that only one implementation satisfies is a divergence, and the point of the file is that it fails loudly instead of drifting quietly.",
+
+  "compatibility": [
+    { "name": "same version",            "data": "1.0.0", "reader": "1.0.0", "expect": "compatible" },
+    { "name": "older minor is fine",     "data": "1.0.0", "reader": "1.4.0", "expect": "compatible" },
+    { "name": "newer minor is forward",  "data": "1.4.0", "reader": "1.0.0", "expect": "forward" },
+    { "name": "patch never matters",     "data": "1.0.9", "reader": "1.0.0", "expect": "compatible" },
+    { "name": "newer major rejected",    "data": "2.0.0", "reader": "1.0.0", "expect": "incompatible" },
+    { "name": "older major rejected",    "data": "0.9.0", "reader": "1.0.0", "expect": "incompatible" },
+    { "name": "garbage",                 "data": "banana", "reader": "1.0.0", "expect": "malformed" },
+    { "name": "empty",                   "data": "",      "reader": "1.0.0", "expect": "malformed" },
+    { "name": "two-part is not semver",  "data": "1.0",   "reader": "1.0.0", "expect": "malformed" }
+  ],
+
+  "prefix": [
+    { "id": "sas.telemetry.thermal", "prefix": "sas.telemetry",         "expect": true },
+    { "id": "sas.telemetry.thermal", "prefix": "sas",                   "expect": true },
+    { "id": "sas.telemetry.thermal", "prefix": "sas.telemetry.thermal", "expect": true },
+    { "id": "sas.telemetry.thermal", "prefix": "*",                     "expect": true },
+    { "id": "sas.telemetryx.thermal","prefix": "sas.telemetry",         "expect": false },
+    { "id": "sas.telemetry",         "prefix": "sas.telemetry.thermal", "expect": false },
+    { "id": "other.telemetry",       "prefix": "sas",                   "expect": false }
+  ],
+
+  "range": [
+    { "version": "1.0.0", "range": "1.x", "expect": true },
+    { "version": "1.9.3", "range": "1.x", "expect": true },
+    { "version": "2.0.0", "range": "1.x", "expect": false },
+    { "version": "1.2.7", "range": "1.2", "expect": true },
+    { "version": "1.3.0", "range": "1.2", "expect": false },
+    { "version": "1.0.0", "range": null,  "expect": true },
+    { "version": "nope",  "range": "1.x", "expect": false }
+  ],
+
+  "identifiers": [
+    { "value": "sas.telemetry.thermal", "type": "capability", "expect": true },
+    { "value": "sas.a.b.c.d.e",         "type": "capability", "expect": true },
+    { "value": "sas.link-engine.state", "type": "capability", "expect": true },
+    { "value": "sas",                   "type": "capability", "expect": false },
+    { "value": "SAS.Telemetry",         "type": "capability", "expect": false },
+    { "value": "sas..thermal",          "type": "capability", "expect": false },
+    { "value": "9sas.thermal",          "type": "capability", "expect": false },
+    { "value": "sas.pod.jacky",         "type": "pod",        "expect": true },
+    { "value": "sas.pod.core-light",    "type": "pod",        "expect": true },
+    { "value": "jacky",                 "type": "pod",        "expect": false },
+    { "value": "Sas.Pod",               "type": "pod",        "expect": false }
+  ],
+
+  "trust": [
+    { "name": "live is trusted",
+      "provenance": { "fidelity": "live", "source": "jacky:/api/metrics", "observedAt": "2026-09-06T22:30:00.000Z" },
+      "trustworthy": true, "badge": null },
+    { "name": "cached is trusted",
+      "provenance": { "fidelity": "cached", "source": "jacky:/api/metrics", "observedAt": "2026-09-06T22:25:00.000Z", "staleMs": 300000 },
+      "trustworthy": true, "badge": null },
+    { "name": "degraded is not",
+      "provenance": { "fidelity": "degraded", "source": "jacky:/api/metrics", "reason": "gpu block missing" },
+      "trustworthy": false, "badge": "PARTIAL" },
+    { "name": "simulated is not",
+      "provenance": { "fidelity": "simulated", "source": "synthetic", "reason": "engine offline" },
+      "trustworthy": false, "badge": "SIMULATED" },
+    { "name": "absent is not",
+      "provenance": { "fidelity": "absent", "source": "jacky:/api/metrics", "reason": "connection refused" },
+      "trustworthy": false, "badge": "NO DATA" }
+  ],
+
+  "validate": [
+    { "name": "well-formed live envelope", "valid": true,
+      "envelope": { "kernel": "1.0.0", "kind": "sas.telemetry.thermal", "id": "e1", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "live", "source": "jacky:/api/metrics", "observedAt": "2026-09-06T22:29:59.000Z" }, "payload": { "gpuC": 61 } } },
+
+    { "name": "live without observedAt", "valid": false, "errorContains": "requires provenance.observedAt",
+      "envelope": { "kernel": "1.0.0", "kind": "sas.telemetry.thermal", "id": "e2", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "live", "source": "jacky:/api/metrics" }, "payload": { "gpuC": 61 } } },
+
+    { "name": "cached without staleMs", "valid": false, "errorContains": "requires provenance.staleMs",
+      "envelope": { "kernel": "1.0.0", "kind": "sas.telemetry.thermal", "id": "e3", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "cached", "source": "jacky:/api/metrics", "observedAt": "2026-09-06T22:20:00.000Z" }, "payload": { "gpuC": 61 } } },
+
+    { "name": "simulated without reason", "valid": false, "errorContains": "requires provenance.reason",
+      "envelope": { "kernel": "1.0.0", "kind": "sas.telemetry.thermal", "id": "e4", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "simulated", "source": "synthetic" }, "payload": { "gpuC": 61 } } },
+
+    { "name": "absent must carry empty payload", "valid": false, "errorContains": "empty payload",
+      "envelope": { "kernel": "1.0.0", "kind": "sas.telemetry.thermal", "id": "e5", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "absent", "source": "jacky:/api/metrics", "reason": "offline" }, "payload": { "gpuC": 61 } } },
+
+    { "name": "absent with empty payload is valid", "valid": true,
+      "envelope": { "kernel": "1.0.0", "kind": "sas.telemetry.thermal", "id": "e6", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "absent", "source": "jacky:/api/metrics", "reason": "offline" }, "payload": {} } },
+
+    { "name": "unknown fidelity", "valid": false, "errorContains": "invalid fidelity",
+      "envelope": { "kernel": "1.0.0", "kind": "sas.telemetry.thermal", "id": "e7", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "probably", "source": "vibes" }, "payload": {} } },
+
+    { "name": "missing source", "valid": false, "errorContains": "provenance.source is required",
+      "envelope": { "kernel": "1.0.0", "kind": "sas.telemetry.thermal", "id": "e8", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "live", "observedAt": "2026-09-06T22:29:00.000Z" }, "payload": {} } },
+
+    { "name": "bad capability id", "valid": false, "errorContains": "invalid kind",
+      "envelope": { "kernel": "1.0.0", "kind": "Thermal", "id": "e9", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "live", "source": "s", "observedAt": "2026-09-06T22:29:00.000Z" }, "payload": {} } },
+
+    { "name": "bad pod id", "valid": false, "errorContains": "invalid pod",
+      "envelope": { "kernel": "1.0.0", "kind": "sas.telemetry.thermal", "id": "e10", "ts": "2026-09-06T22:30:00.000Z", "pod": "Jacky",
+        "provenance": { "fidelity": "live", "source": "s", "observedAt": "2026-09-06T22:29:00.000Z" }, "payload": {} } },
+
+    { "name": "ts without milliseconds", "valid": false, "errorContains": "invalid ts",
+      "envelope": { "kernel": "1.0.0", "kind": "sas.telemetry.thermal", "id": "e11", "ts": "2026-09-06T22:30:00Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "live", "source": "s", "observedAt": "2026-09-06T22:29:00.000Z" }, "payload": {} } },
+
+    { "name": "incompatible major rejected", "valid": false, "errorContains": "incompatible kernel major",
+      "envelope": { "kernel": "2.0.0", "kind": "sas.telemetry.thermal", "id": "e12", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "live", "source": "s", "observedAt": "2026-09-06T22:29:00.000Z" }, "payload": {} } },
+
+    { "name": "newer minor accepted", "valid": true,
+      "envelope": { "kernel": "1.7.0", "kind": "sas.telemetry.thermal", "id": "e13", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "live", "source": "s", "observedAt": "2026-09-06T22:29:00.000Z" }, "payload": {} } },
+
+    { "name": "negative staleMs", "valid": false, "errorContains": "invalid provenance.staleMs",
+      "envelope": { "kernel": "1.0.0", "kind": "sas.telemetry.thermal", "id": "e14", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "cached", "source": "s", "observedAt": "2026-09-06T22:29:00.000Z", "staleMs": -5 }, "payload": {} } }
+  ],
+
+  "roundtrip": [
+    { "name": "plain envelope survives untouched",
+      "input": { "kernel": "1.0.0", "kind": "sas.telemetry.thermal", "id": "r1", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "live", "source": "jacky:/api/metrics", "observedAt": "2026-09-06T22:29:59.000Z" }, "payload": { "gpuC": 61, "cpuPct": 12 } } },
+
+    { "name": "unknown top-level key from a newer producer is preserved",
+      "input": { "kernel": "1.4.0", "kind": "sas.telemetry.thermal", "id": "r2", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "live", "source": "jacky:/api/metrics", "observedAt": "2026-09-06T22:29:59.000Z" }, "payload": { "gpuC": 61 },
+        "trace": { "span": "abc", "parent": null } },
+      "expectExt": ["trace"] },
+
+    { "name": "unknown provenance key is preserved",
+      "input": { "kernel": "1.4.0", "kind": "sas.telemetry.thermal", "id": "r3", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "cached", "source": "jacky:/api/metrics", "observedAt": "2026-09-06T22:20:00.000Z", "staleMs": 600000, "confidence": 0.8 },
+        "payload": { "gpuC": 61 } },
+      "expectProvExt": ["confidence"] },
+
+    { "name": "several unknown keys at both levels",
+      "input": { "kernel": "1.9.0", "kind": "sas.route.ask", "id": "r4", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "degraded", "source": "cloud:groq", "reason": "local gpu at 78C", "attempt": 2, "chain": ["local", "groq"] },
+        "payload": { "answer": "…" }, "cost": { "usd": 0 }, "region": "eu-west" },
+      "expectExt": ["cost", "region"], "expectProvExt": ["attempt", "chain"] },
+
+    { "name": "nested payload structures are opaque and untouched",
+      "input": { "kernel": "1.0.0", "kind": "sas.knowledge.chunk", "id": "r5", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.core-light-vault",
+        "provenance": { "fidelity": "live", "source": "vault:index", "observedAt": "2026-09-06T22:29:00.000Z" },
+        "payload": { "deep": { "list": [1, 2, { "x": null }], "unicode": "eYe ⌁ pod", "empty": {} } } } },
+
+    { "name": "absent envelope round-trips",
+      "input": { "kernel": "1.0.0", "kind": "sas.telemetry.thermal", "id": "r6", "ts": "2026-09-06T22:30:00.000Z", "pod": "sas.pod.jacky",
+        "provenance": { "fidelity": "absent", "source": "jacky:/api/metrics", "reason": "connection refused" }, "payload": {} } }
+  ],
+
+  "derive": [
+    { "name": "live from live stays live",
+      "sources": [ { "fidelity": "live", "source": "a", "observedAt": "2026-09-06T22:29:00.000Z" } ],
+      "request": { "fidelity": "live", "source": "b", "observedAt": "2026-09-06T22:30:00.000Z" },
+      "expectFidelity": "live" },
+
+    { "name": "live from cached degrades to cached",
+      "sources": [ { "fidelity": "cached", "source": "a", "observedAt": "2026-09-06T22:20:00.000Z", "staleMs": 600000 } ],
+      "request": { "fidelity": "live", "source": "b", "observedAt": "2026-09-06T22:30:00.000Z" },
+      "expectFidelity": "cached" },
+
+    { "name": "simulated cannot be laundered into live",
+      "sources": [ { "fidelity": "simulated", "source": "synthetic", "reason": "engine offline" } ],
+      "request": { "fidelity": "live", "source": "b", "observedAt": "2026-09-06T22:30:00.000Z" },
+      "expectFidelity": "simulated", "expectReasonContains": "engine offline" },
+
+    { "name": "weakest of several inputs wins",
+      "sources": [
+        { "fidelity": "live", "source": "a", "observedAt": "2026-09-06T22:29:00.000Z" },
+        { "fidelity": "degraded", "source": "b", "reason": "partial sample" },
+        { "fidelity": "cached", "source": "c", "observedAt": "2026-09-06T22:20:00.000Z", "staleMs": 600000 }
+      ],
+      "request": { "fidelity": "live", "source": "d", "observedAt": "2026-09-06T22:30:00.000Z" },
+      "expectFidelity": "degraded", "expectReasonContains": "partial sample" },
+
+    { "name": "absent input collapses the result and empties the payload",
+      "sources": [ { "fidelity": "absent", "source": "a", "reason": "connection refused" } ],
+      "request": { "fidelity": "live", "source": "b", "observedAt": "2026-09-06T22:30:00.000Z" },
+      "expectFidelity": "absent", "expectEmptyPayload": true, "expectReasonContains": "connection refused" },
+
+    { "name": "no sources leaves the request untouched",
+      "sources": [],
+      "request": { "fidelity": "live", "source": "b", "observedAt": "2026-09-06T22:30:00.000Z" },
+      "expectFidelity": "live" }
+  ],
+
+  "resolve": [
+    { "name": "exact match",
+      "manifests": [ { "kernel": "1.0.0", "pod": { "id": "sas.pod.jacky", "name": "J", "role": "engine", "repo": "o/r" },
+        "provides": [ { "id": "sas.telemetry.thermal", "version": "1.0.0" } ] } ],
+      "request": "sas.telemetry.thermal", "expectStatus": "exact", "expectPod": "sas.pod.jacky", "expectChain": ["sas.telemetry.thermal"] },
+
+    { "name": "unmet requires forces the degradesTo fallback",
+      "manifests": [ { "kernel": "1.0.0", "pod": { "id": "sas.pod.jacky", "name": "J", "role": "engine", "repo": "o/r" },
+        "provides": [
+          { "id": "sas.telemetry.thermal", "version": "1.0.0", "requires": ["sas.link.engine"], "degradesTo": "sas.telemetry.coarse" },
+          { "id": "sas.telemetry.coarse", "version": "1.0.0" } ] } ],
+      "request": "sas.telemetry.thermal", "expectStatus": "degraded",
+      "expectChain": ["sas.telemetry.thermal", "sas.telemetry.coarse"] },
+
+    { "name": "nothing provides it and there is no fallback",
+      "manifests": [ { "kernel": "1.0.0", "pod": { "id": "sas.pod.jacky", "name": "J", "role": "engine", "repo": "o/r" },
+        "provides": [ { "id": "sas.telemetry.coarse", "version": "1.0.0" } ] } ],
+      "request": "sas.route.ask", "expectStatus": "unresolved" },
+
+    { "name": "highest payload version wins among providers",
+      "manifests": [
+        { "kernel": "1.0.0", "pod": { "id": "sas.pod.a", "name": "A", "role": "surface", "repo": "o/a" },
+          "provides": [ { "id": "sas.route.ask", "version": "1.2.0" } ] },
+        { "kernel": "1.0.0", "pod": { "id": "sas.pod.b", "name": "B", "role": "surface", "repo": "o/b" },
+          "provides": [ { "id": "sas.route.ask", "version": "1.10.0" } ] } ],
+      "request": "sas.route.ask", "expectStatus": "exact", "expectPod": "sas.pod.b" },
+
+    { "name": "range filters out an incompatible provider",
+      "manifests": [ { "kernel": "1.0.0", "pod": { "id": "sas.pod.a", "name": "A", "role": "surface", "repo": "o/a" },
+        "provides": [ { "id": "sas.route.ask", "version": "2.0.0" } ] } ],
+      "request": "sas.route.ask", "range": "1.x", "expectStatus": "unresolved" },
+
+    { "name": "degradesTo cycle terminates instead of hanging",
+      "manifests": [ { "kernel": "1.0.0", "pod": { "id": "sas.pod.a", "name": "A", "role": "surface", "repo": "o/a" },
+        "provides": [
+          { "id": "sas.a.one", "version": "1.0.0", "requires": ["sas.missing.dep"], "degradesTo": "sas.a.two" },
+          { "id": "sas.a.two", "version": "1.0.0", "requires": ["sas.missing.dep"], "degradesTo": "sas.a.one" } ] } ],
+      "request": "sas.a.one", "expectStatus": "unresolved" }
+  ]
+}
