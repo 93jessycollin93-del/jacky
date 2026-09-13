@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sas.cybernetic67.com/spec/1.0.0/capability.schema.json",
+  "title": "SAS Superstation Capability Descriptor",
+  "description": "What a pod declares it can do. See SPEC.md §7.",
+  "type": "object",
+  "required": ["id", "version"],
+  "properties": {
+    "id": { "$ref": "#/$defs/capabilityId" },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semver of the PAYLOAD contract. Independent of the kernel version."
+    },
+    "title": { "type": "string" },
+    "degradesTo": {
+      "$ref": "#/$defs/capabilityId",
+      "description": "Capability to fall back to when this one cannot be resolved."
+    },
+    "requires": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capabilityId" },
+      "description": "Capabilities that must themselves resolve for this one to be usable."
+    },
+    "privileged": {
+      "type": "boolean",
+      "default": false,
+      "description": "Declares that this capability mutates state or exposes secrets. Declaration only - enforcement stays with each platform's auth layer (SPEC.md §9)."
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "capabilityId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9-]*){1,5}$",
+      "description": "Dotted lowercase capability ID, e.g. sas.telemetry.thermal. Prefixes are meaningful for subscription."
+    },
+    "podId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z0-9-]+){1,3}$",
+      "description": "Pod ID, conventionally sas.pod.<name>."
+    }
+  }
+}

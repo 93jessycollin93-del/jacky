@@ -1,0 +1,57 @@
+name: superstation
+
+# The foundation checks itself. Two kernels run the same vectors, every manifest
+# in the repo is validated, and vendored copies are compared against the source
+# they were taken from.
+
+on:
+  push:
+    paths:
+      - 'superstation/**'
+      - 'station.pod.json'
+      - '.github/workflows/superstation.yml'
+  pull_request:
+    paths:
+      - 'superstation/**'
+      - 'station.pod.json'
+      - '.github/workflows/superstation.yml'
+  workflow_dispatch:
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 22.18+ strips TypeScript types on import, so the TS kernel runs with no
+      # build step and no dependencies.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Conformance — python kernel
+        run: python3 superstation/conformance/test_conformance.py
+
+      - name: Conformance — typescript kernel
+        run: node superstation/conformance/conformance.mjs
+
+      - name: Validate pod manifests
+        run: python3 superstation/tools/station_doctor.py .
+
+      - name: Schemas are well-formed JSON
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+          bad = []
+          for p in sorted(pathlib.Path('superstation/spec').glob('*.json')):
+              try:
+                  json.loads(p.read_text())
+              except ValueError as err:
+                  bad.append(f"{p}: {err}")
+          print('\n'.join(bad) if bad else 'all schemas parse')
+          sys.exit(1 if bad else 0)
+          PY
